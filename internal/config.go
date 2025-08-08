@@ -26,9 +26,13 @@ type Config struct {
 	AppPort  string
 	AppEnv   string
 	LogLevel string
+	CacheEnabled bool
 }
 
 func LoadConfig() *Config {
+	cacheEnabled := os.Getenv("CACHE_ENABLED")
+	enabled := cacheEnabled == "true" || cacheEnabled == ""
+	
 	return &Config{
 		RiotAPIKey:    os.Getenv("RIOT_API_KEY"),
 		RiotRegion:    os.Getenv("RIOT_REGION"),
@@ -56,5 +60,6 @@ func LoadConfig() *Config {
 		AppPort:  os.Getenv("APP_PORT"),
 		AppEnv:   os.Getenv("APP_ENV"),
 		LogLevel: os.Getenv("LOG_LEVEL"),
+		CacheEnabled: enabled,
 	}
 }

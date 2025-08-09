@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"log"
 	"time"
 )
@@ -150,27 +151,121 @@ func (c *RiotAPIClient) GetAccountByPUUID(puuid string) (*AccountData, error) {
 
 func (c *RiotAPIClient) GetAccountByGameName(gameName, tagLine string) (*AccountData, error) {
 	ctx := context.Background()
-	cacheKey := c.CacheManager.GenerateKey("account_name", c.Region, gameName, tagLine)
+	
+	// Limpar e validar parâmetros
+	cleanGameName := strings.TrimSpace(gameName)
+	cleanTagLine := strings.TrimSpace(tagLine)
+	
+	if cleanGameName == "" {
+		return nil, fmt.Errorf("gameName cannot be empty")
+	}
+	
+	if cleanTagLine == "" {
+		cleanTagLine = "BR1"
+	}
+	
+	// Verificar cache primeiro
+	cacheKey := c.CacheManager.GenerateKey("account_name", c.Region, cleanGameName, cleanTagLine)
 	
 	var cachedResult AccountData
 	if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
+		log.Printf("💾 Cache hit for account: %s#%s", cleanGameName, cleanTagLine)
 		return &cachedResult, nil
 	}
 	
-	encodedGameName := url.QueryEscape(gameName)
-	encodedTagLine := url.QueryEscape(tagLine)
+	// CORREÇÃO: Usar encoding adequado para a API Riot
+	// A API Riot espera %20 para espaços, não +
+	encodedGameName := strings.ReplaceAll(url.QueryEscape(cleanGameName), "+", "%20")
+	encodedTagLine := strings.ReplaceAll(url.QueryEscape(cleanTagLine), "+", "%20")
 	
-	url := fmt.Sprintf("%s/riot/account/v1/accounts/by-riot-id/%s/%s", c.AccountURL, encodedGameName, encodedTagLine)
-	data, err := c.doRequest(url)
+	// Construir URL da API
+	apiURL := fmt.Sprintf("%s/riot/account/v1/accounts/by-riot-id/%s/%s", c.AccountURL, encodedGameName, encodedTagLine)
+	
+	// Logs detalhados para debug
+	log.Printf("🔍 Searching account: '%s#%s'", cleanGameName, cleanTagLine)
+	log.Printf("🌐 API URL: %s", apiURL)
+	log.Printf("📝 Encoded: gameName='%s', tagLine='%s'", encodedGameName, encodedTagLine)
+	
+	// Tentar também com case variations se falhar
+	data, err := c.doRequest(apiURL)
+	if err != nil && strings.Contains(err.Error(), "404") {
+		log.Printf("❌ Primeira tentativa falhou, tentando variações de case...")
+		
+		// Tentar com tudo minúsculo
+		lowerGameName := strings.ToLower(cleanGameName)
+		lowerTagLine := strings.ToLower(cleanTagLine)
+		
+		if lowerGameName != cleanGameName || lowerTagLine != cleanTagLine {
+			encodedLowerGameName := strings.ReplaceAll(url.QueryEscape(lowerGameName), "+", "%20")
+			encodedLowerTagLine := strings.ReplaceAll(url.QueryEscape(lowerTagLine), "+", "%20")
+			
+			lowerURL := fmt.Sprintf("%s/riot/account/v1/accounts/by-riot-id/%s/%s", c.AccountURL, encodedLowerGameName, encodedLowerTagLine)
+			
+			log.Printf("🔄 Tentando lowercase: %s#%s", lowerGameName, lowerTagLine)
+			log.Printf("🌐 Lower URL: %s", lowerURL)
+			
+			data, err = c.doRequest(lowerURL)
+			if err == nil {
+				log.Printf("✅ Sucesso com lowercase!")
+			}
+		}
+		
+		// Se ainda falhar, tentar outras variações
+		if err != nil && strings.Contains(err.Error(), "404") {
+			variations := [][]string{
+				{strings.Title(cleanGameName), strings.ToUpper(cleanTagLine)}, // Title Case + UPPER
+				{strings.ToUpper(cleanGameName), strings.ToUpper(cleanTagLine)}, // ALL UPPER
+			}
+			
+			for _, variant := range variations {
+				varGameName, varTagLine := variant[0], variant[1]
+				if varGameName == cleanGameName && varTagLine == cleanTagLine {
+					continue // Já tentamos
+				}
+				
+				encodedVarGameName := strings.ReplaceAll(url.QueryEscape(varGameName), "+", "%20")
+				encodedVarTagLine := strings.ReplaceAll(url.QueryEscape(varTagLine), "+", "%20")
+				
+				varURL := fmt.Sprintf("%s/riot/account/v1/accounts/by-riot-id/%s/%s", c.AccountURL, encodedVarGameName, encodedVarTagLine)
+				
+				log.Printf("🔄 Tentando variação: %s#%s", varGameName, varTagLine)
+				log.Printf("🌐 Variant URL: %s", varURL)
+				
+				data, err = c.doRequest(varURL)
+				if err == nil {
+					log.Printf("✅ Sucesso com variação: %s#%s", varGameName, varTagLine)
+					cleanGameName, cleanTagLine = varGameName, varTagLine
+					break
+				}
+			}
+		}
+	}
+	
 	if err != nil {
+		log.Printf("❌ Account API error for %s#%s: %v", cleanGameName, cleanTagLine, err)
 		return nil, err
 	}
 	
+	// Parse da resposta
 	var result AccountData
 	if err := json.Unmarshal(data, &result); err != nil {
+		log.Printf("❌ JSON unmarshal error for %s#%s: %v", cleanGameName, cleanTagLine, err)
+		log.Printf("📄 Raw response: %s", string(data))
 		return nil, err
 	}
 	
+	// Validar dados retornados
+	if result.PUUID == "" {
+		log.Printf("❌ Empty PUUID in response for %s#%s", cleanGameName, cleanTagLine)
+		log.Printf("📄 Response data: %+v", result)
+		return nil, fmt.Errorf("invalid account data: empty PUUID")
+	}
+	
+	// Sucesso!
+	log.Printf("✅ Account found: %s#%s -> PUUID: %s", result.GameName, result.TagLine, result.PUUID)
+	
+	// Cachear resultado (usando os dados originais da busca bem-sucedida)
+	cacheKey = c.CacheManager.GenerateKey("account_name", c.Region, cleanGameName, cleanTagLine)
 	c.CacheManager.SetCachedData(ctx, cacheKey, result, 6*time.Hour)
 	return &result, nil
 }

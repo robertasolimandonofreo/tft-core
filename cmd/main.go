@@ -9,7 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
+	"strings"
 	"github.com/nats-io/nats.go"
 	"github.com/robertasolimandonofreo/tft-core/internal"
 )
@@ -99,6 +99,8 @@ func searchPlayerHandler(w http.ResponseWriter, r *http.Request) {
 		tagLine = "BR1"
 	}
 	
+	log.Printf("🔍 Search request: gameName='%s', tagLine='%s'", gameName, tagLine)
+	
 	allowed, err := ratelimiter.Allow(ctx, "search:"+gameName+":"+tagLine)
 	if err != nil {
 		log.Printf("Rate limiter error: %v", err)
@@ -106,21 +108,51 @@ func searchPlayerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allowed {
+		log.Printf("Rate limit exceeded for search: %s#%s", gameName, tagLine)
 		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 	
 	accountData, err := riotClient.GetAccountByGameName(gameName, tagLine)
 	if err != nil {
-		log.Printf("Error finding account: %v", err)
-		http.Error(w, "Player not found", http.StatusNotFound)
+		log.Printf("Error finding account %s#%s: %v", gameName, tagLine, err)
+		
+		if strings.Contains(err.Error(), "404") {
+			http.Error(w, "Player not found", http.StatusNotFound)
+			return
+		}
+		
+		if strings.Contains(err.Error(), "403") {
+			http.Error(w, "API key invalid or expired", http.StatusServiceUnavailable)
+			return
+		}
+		
+		if strings.Contains(err.Error(), "429") {
+			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+		
+		http.Error(w, "Failed to fetch account data", http.StatusBadGateway)
 		return
 	}
 	
+	log.Printf("✅ Account found: %s#%s -> PUUID: %s", accountData.GameName, accountData.TagLine, accountData.PUUID)
+	
 	summonerData, err := riotClient.GetSummonerByPUUID(accountData.PUUID)
 	if err != nil {
-		log.Printf("Error fetching summoner data: %v", err)
-		http.Error(w, "Failed to fetch player data", http.StatusBadGateway)
+		log.Printf("Error fetching summoner data for PUUID %s: %v", accountData.PUUID, err)
+		
+		result := map[string]interface{}{
+			"account":  accountData,
+			"puuid":    accountData.PUUID,
+			"gameName": accountData.GameName,
+			"tagLine":  accountData.TagLine,
+			"summoner": nil,
+			"error":    "Summoner data not available",
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
 		return
 	}
 	
@@ -131,6 +163,8 @@ func searchPlayerHandler(w http.ResponseWriter, r *http.Request) {
 		"gameName": accountData.GameName,
 		"tagLine":  accountData.TagLine,
 	}
+	
+	log.Printf("🎮 Search successful: %s#%s", accountData.GameName, accountData.TagLine)
 	
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)

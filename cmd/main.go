@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/nats-io/nats.go"
-
 	"github.com/robertasolimandonofreo/tft-core/internal"
 )
 
@@ -21,9 +24,16 @@ var (
 
 func withCORS(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			origin = "*"
+		}
+		
+		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -33,8 +43,16 @@ func withCORS(h http.HandlerFunc) http.HandlerFunc {
 }
 
 func healthzHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("ok"))
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ok",
+		"timestamp": time.Now().Unix(),
+		"services": map[string]string{
+			"redis": "connected",
+			"nats": "connected",
+		},
+	})
 }
 
 func summonerHandler(w http.ResponseWriter, r *http.Request) {
@@ -44,20 +62,25 @@ func summonerHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "puuid is required", http.StatusBadRequest)
 		return
 	}
-	allowed, err := ratelimiter.Allow(ctx, puuid)
+	
+	allowed, err := ratelimiter.Allow(ctx, "summoner:"+puuid)
 	if err != nil {
-		http.Error(w, "Error on rate limiter", http.StatusInternalServerError)
+		log.Printf("Rate limiter error: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	if !allowed {
 		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
+	
 	result, err := riotClient.GetSummonerByPUUID(puuid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		log.Printf("Riot API error: %v", err)
+		http.Error(w, "Failed to fetch summoner data", http.StatusBadGateway)
 		return
 	}
+	
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
@@ -71,22 +94,25 @@ func setupRoutes() {
 	http.HandleFunc("/league/master", withCORS(internal.NewMasterHandler(riotClient, ratelimiter)))
 	http.HandleFunc("/league/entries", withCORS(internal.NewEntriesHandler(riotClient, ratelimiter)))
 	http.HandleFunc("/league/by-puuid", withCORS(internal.NewLeagueByPUUIDHandler(riotClient, ratelimiter)))
-	http.HandleFunc("/league/rated-ladder", withCORS(internal.NewRatedLadderHandler(riotClient, ratelimiter)))
 }
 
 func scheduleLeagueUpdates() {
 	ticker := time.NewTicker(30 * time.Minute)
 	go func() {
-		for range ticker.C {
-			tasks := []internal.LeagueUpdateTask{
-				{Type: "challenger", Region: cfg.RiotRegion},
-				{Type: "grandmaster", Region: cfg.RiotRegion},
-				{Type: "master", Region: cfg.RiotRegion},
-			}
-			
-			for _, task := range tasks {
-				if err := natsClient.PublishLeagueUpdateTask(task); err != nil {
-					log.Printf("Error publishing league update task: %v", err)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				tasks := []internal.LeagueUpdateTask{
+					{Type: "challenger", Region: cfg.RiotRegion},
+					{Type: "grandmaster", Region: cfg.RiotRegion},
+					{Type: "master", Region: cfg.RiotRegion},
+				}
+				
+				for _, task := range tasks {
+					if err := natsClient.PublishLeagueUpdateTask(task); err != nil {
+						log.Printf("Error publishing league update task: %v", err)
+					}
 				}
 			}
 		}
@@ -97,7 +123,7 @@ func scheduleLeagueUpdates() {
 func main() {
 	cfg = internal.LoadConfig()
 
-	ratelimiter = internal.NewRateLimiter(cfg, 5, 10*time.Second)
+	ratelimiter = internal.NewRateLimiter(cfg, 100, 10*time.Second)
 
 	cacheManager = internal.NewCacheManager(cfg)
 
@@ -123,15 +149,38 @@ func main() {
 	}
 
 	setupRoutes()
-
 	scheduleLeagueUpdates()
 
 	port := cfg.AppPort
 	if port == "" {
 		port = "8000"
 	}
-	log.Printf("Server started on port %s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
-		log.Fatalf("Error starting server: %v", err)
+
+	server := &http.Server{
+		Addr:         ":" + port,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
+
+	go func() {
+		log.Printf("Server starting on port %s", port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Error starting server: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	log.Println("Server exited")
 }

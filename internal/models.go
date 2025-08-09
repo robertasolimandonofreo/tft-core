@@ -48,21 +48,6 @@ type MasterLeague struct {
 	Queue    string        `json:"queue"`
 }
 
-type RatedLadder struct {
-	Queue   string             `json:"queue"`
-	Tier    string             `json:"tier"`
-	Entries []RatedLadderEntry `json:"entries"`
-}
-
-type RatedLadderEntry struct {
-	SummonerID     string `json:"summonerId"`
-	SummonerName   string `json:"summonerName"`
-	RatedTier      string `json:"ratedTier"`
-	RatedRating    int    `json:"ratedRating"`
-	LeaguePoints   int    `json:"leaguePoints"`
-	Wins           int    `json:"wins"`
-	PreviousUpdate int64  `json:"previousUpdate"`
-}
 
 type LeagueEntriesResponse struct {
 	Entries  []LeagueEntry `json:"entries"`
@@ -78,4 +63,14 @@ type LeagueUpdateTask struct {
 	Division string `json:"division,omitempty"`
 	Region   string `json:"region"`
 	Page     int    `json:"page,omitempty"`
+}
+
+type Summoner struct {
+    ID            string `json:"id"`
+    AccountID     string `json:"accountId"`
+    PUUID         string `json:"puuid"`
+    Name          string `json:"name"`
+    ProfileIconID int    `json:"profileIconId"`
+    RevisionDate  int64  `json:"revisionDate"`
+    SummonerLevel int    `json:"summonerLevel"`
 }

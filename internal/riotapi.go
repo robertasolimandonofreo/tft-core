@@ -30,6 +30,24 @@ func NewRiotAPIClient(cfg *Config, cacheManager *CacheManager) *RiotAPIClient {
 	}
 }
 
+func (c *RiotAPIClient) enrichLeagueEntriesNames(entries []LeagueEntry) []LeagueEntry {
+    lookups := 0
+    maxLookups := 20
+    for i := range entries {
+        if lookups >= maxLookups {
+            break
+        }
+        if entries[i].SummonerName == "" || entries[i].SummonerName == "Unknown" {
+            summ, err := c.GetSummonerByID(entries[i].SummonerID)
+            if err == nil && summ != nil && summ.Name != "" {
+                entries[i].SummonerName = summ.Name
+                lookups++
+            }
+        }
+    }
+    return entries
+}
+
 func (c *RiotAPIClient) doRequest(path string) ([]byte, error) {
 	url := fmt.Sprintf("%s%s", c.BaseURL, path)
 	req, err := http.NewRequest("GET", url, nil)
@@ -76,13 +94,35 @@ func (c *RiotAPIClient) GetSummonerByPUUID(puuid string) (map[string]interface{}
 	return result, nil
 }
 
+func (c *RiotAPIClient) GetSummonerByID(id string) (*Summoner, error) {
+    ctx := context.Background()
+    cacheKey := c.CacheManager.GenerateKey("summoner_id", c.Region, id)
+    var cached Summoner
+    if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cached); err == nil {
+        return &cached, nil
+    }
+    path := fmt.Sprintf("/tft/summoner/v1/summoners/%s", id)
+    data, err := c.doRequest(path)
+    if err != nil {
+        return nil, err
+    }
+    var result Summoner
+    if err := json.Unmarshal(data, &result); err != nil {
+        return nil, err
+    }
+    c.CacheManager.SetCachedData(ctx, cacheKey, result, time.Hour)
+    return &result, nil
+}
+
 func (c *RiotAPIClient) GetChallengerLeague() (*ChallengerLeague, error) {
 	ctx := context.Background()
 	cacheKey := c.CacheManager.GenerateKey("challenger", c.Region)
 	
 	var cachedResult ChallengerLeague
-	if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
-		return &cachedResult, nil
+    if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
+        cachedResult.Entries = c.enrichLeagueEntriesNames(cachedResult.Entries)
+        _ = c.CacheManager.SetCachedData(ctx, cacheKey, cachedResult, 30*time.Minute)
+        return &cachedResult, nil
 	}
 	
 	path := "/tft/league/v1/challenger"
@@ -91,12 +131,13 @@ func (c *RiotAPIClient) GetChallengerLeague() (*ChallengerLeague, error) {
 		return nil, err
 	}
 	
-	var result ChallengerLeague
-	if err := json.Unmarshal(data, &result); err != nil {
+    var result ChallengerLeague
+    if err := json.Unmarshal(data, &result); err != nil {
 		return nil, err
 	}
+    result.Entries = c.enrichLeagueEntriesNames(result.Entries)
 	
-	c.CacheManager.SetCachedData(ctx, cacheKey, result, 30*time.Minute)
+    c.CacheManager.SetCachedData(ctx, cacheKey, result, 30*time.Minute)
 	return &result, nil
 }
 
@@ -104,9 +145,11 @@ func (c *RiotAPIClient) GetGrandmasterLeague() (*GrandmasterLeague, error) {
 	ctx := context.Background()
 	cacheKey := c.CacheManager.GenerateKey("grandmaster", c.Region)
 	
-	var cachedResult GrandmasterLeague
-	if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
-		return &cachedResult, nil
+    var cachedResult GrandmasterLeague
+    if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
+        cachedResult.Entries = c.enrichLeagueEntriesNames(cachedResult.Entries)
+        _ = c.CacheManager.SetCachedData(ctx, cacheKey, cachedResult, 30*time.Minute)
+        return &cachedResult, nil
 	}
 	
 	path := "/tft/league/v1/grandmaster"
@@ -115,12 +158,13 @@ func (c *RiotAPIClient) GetGrandmasterLeague() (*GrandmasterLeague, error) {
 		return nil, err
 	}
 	
-	var result GrandmasterLeague
-	if err := json.Unmarshal(data, &result); err != nil {
+    var result GrandmasterLeague
+    if err := json.Unmarshal(data, &result); err != nil {
 		return nil, err
 	}
+    result.Entries = c.enrichLeagueEntriesNames(result.Entries)
 	
-	c.CacheManager.SetCachedData(ctx, cacheKey, result, 30*time.Minute)
+    c.CacheManager.SetCachedData(ctx, cacheKey, result, 30*time.Minute)
 	return &result, nil
 }
 
@@ -128,9 +172,11 @@ func (c *RiotAPIClient) GetMasterLeague() (*MasterLeague, error) {
 	ctx := context.Background()
 	cacheKey := c.CacheManager.GenerateKey("master", c.Region)
 	
-	var cachedResult MasterLeague
-	if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
-		return &cachedResult, nil
+    var cachedResult MasterLeague
+    if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
+        cachedResult.Entries = c.enrichLeagueEntriesNames(cachedResult.Entries)
+        _ = c.CacheManager.SetCachedData(ctx, cacheKey, cachedResult, 30*time.Minute)
+        return &cachedResult, nil
 	}
 	
 	path := "/tft/league/v1/master"
@@ -139,12 +185,13 @@ func (c *RiotAPIClient) GetMasterLeague() (*MasterLeague, error) {
 		return nil, err
 	}
 	
-	var result MasterLeague
-	if err := json.Unmarshal(data, &result); err != nil {
+    var result MasterLeague
+    if err := json.Unmarshal(data, &result); err != nil {
 		return nil, err
 	}
+    result.Entries = c.enrichLeagueEntriesNames(result.Entries)
 	
-	c.CacheManager.SetCachedData(ctx, cacheKey, result, 30*time.Minute)
+    c.CacheManager.SetCachedData(ctx, cacheKey, result, 30*time.Minute)
 	return &result, nil
 }
 
@@ -153,8 +200,10 @@ func (c *RiotAPIClient) GetLeagueEntries(tier, division string, page int) (*Leag
 	cacheKey := c.CacheManager.GenerateKey("entries", c.Region, tier, division, strconv.Itoa(page))
 	
 	var cachedResult LeagueEntriesResponse
-	if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
-		return &cachedResult, nil
+    if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
+        cachedResult.Entries = c.enrichLeagueEntriesNames(cachedResult.Entries)
+        _ = c.CacheManager.SetCachedData(ctx, cacheKey, cachedResult, 30*time.Minute)
+        return &cachedResult, nil
 	}
 	
 	path := fmt.Sprintf("/tft/league/v1/entries/%s/%s?page=%d", tier, division, page)
@@ -163,11 +212,13 @@ func (c *RiotAPIClient) GetLeagueEntries(tier, division string, page int) (*Leag
 		return nil, err
 	}
 	
-	var entries []LeagueEntry
-	if err := json.Unmarshal(data, &entries); err != nil {
+    var entries []LeagueEntry
+    if err := json.Unmarshal(data, &entries); err != nil {
 		return nil, err
 	}
 	
+    entries = c.enrichLeagueEntriesNames(entries)
+
 	result := &LeagueEntriesResponse{
 		Entries:  entries,
 		Page:     page,
@@ -204,29 +255,6 @@ func (c *RiotAPIClient) GetLeagueByPUUID(puuid string) ([]LeagueEntry, error) {
 	return result, nil
 }
 
-func (c *RiotAPIClient) GetRatedLadderTop(queue string) (*RatedLadder, error) {
-	ctx := context.Background()
-	cacheKey := c.CacheManager.GenerateKey("rated_ladder", c.Region, queue)
-	
-	var cachedResult RatedLadder
-	if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
-		return &cachedResult, nil
-	}
-	
-	path := fmt.Sprintf("/tft/league/v1/rated-ladders/%s/top", queue)
-	data, err := c.doRequest(path)
-	if err != nil {
-		return nil, err
-	}
-	
-	var result RatedLadder
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, err
-	}
-	
-	c.CacheManager.SetCachedData(ctx, cacheKey, result, time.Hour)
-	return &result, nil
-}
 
 func (c *RiotAPIClient) GetMatchByID(matchId string) (map[string]interface{}, error) {
 	ctx := context.Background()

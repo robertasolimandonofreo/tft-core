@@ -19,7 +19,6 @@ var leagueRateLimits = map[string]RateLimitConfig{
 	"master":       {Limit: 25, Window: 10 * time.Second},
 	"entries":      {Limit: 200, Window: 10 * time.Second},
 	"by-puuid":     {Limit: 16000, Window: 10 * time.Second},
-	"rated-ladder": {Limit: 16000, Window: 10 * time.Second},
 }
 
 func NewChallengerHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter) http.HandlerFunc {
@@ -168,37 +167,6 @@ func NewLeagueByPUUIDHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter
 		}
 		
 		result, err := riotClient.GetLeagueByPUUID(puuid)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(result)
-	}
-}
-
-func NewRatedLadderHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		queue := r.URL.Query().Get("queue")
-		if queue == "" {
-			http.Error(w, "queue is required", http.StatusBadRequest)
-			return
-		}
-		
-		ctx := r.Context()
-		allowed, err := rateLimiter.Allow(ctx, fmt.Sprintf("ladder:%s", queue))
-		if err != nil {
-			fmt.Printf("Rated ladder rate limiter error: %v\n", err)
-			http.Error(w, fmt.Sprintf("Rate limiter error: %v", err), http.StatusInternalServerError)
-			return
-		}
-		if !allowed {
-			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
-			return
-		}
-		
-		result, err := riotClient.GetRatedLadderTop(queue)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return

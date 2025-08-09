@@ -42,7 +42,7 @@ func LoadConfig() *Config {
 		PostgresPort:     os.Getenv("POSTGRES_PORT"),
 		PostgresUser:     os.Getenv("POSTGRES_USER"),
 		PostgresPassword: os.Getenv("POSTGRES_PASSWORD"),
-		PostgresDatabase: os.Getenv("POSTGRES_DATABASE"),
+		PostgresDatabase: os.Getenv("POSTGRES_DB"),
 		PostgresSSLMode:  os.Getenv("POSTGRES_SSL_MODE"),
 
 		RedisHost:     os.Getenv("REDIS_HOST"),

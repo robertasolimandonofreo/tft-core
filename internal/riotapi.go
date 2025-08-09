@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strconv"
 	"log"
 	"time"
@@ -14,6 +15,7 @@ import (
 type RiotAPIClient struct {
 	APIKey       string
 	BaseURL      string
+	AccountURL   string
 	Client       *http.Client
 	CacheManager *CacheManager
 	Region       string
@@ -21,9 +23,12 @@ type RiotAPIClient struct {
 }
 
 func NewRiotAPIClient(cfg *Config, cacheManager *CacheManager) *RiotAPIClient {
+	accountURL := getAccountURL(cfg.RiotRegion)
+	
 	return &RiotAPIClient{
 		APIKey:       cfg.RiotAPIKey,
 		BaseURL:      cfg.RiotBaseURL,
+		AccountURL:   accountURL,
 		Region:       cfg.RiotRegion,
 		CacheManager: cacheManager,
 		Client: &http.Client{
@@ -32,12 +37,39 @@ func NewRiotAPIClient(cfg *Config, cacheManager *CacheManager) *RiotAPIClient {
 	}
 }
 
+func getAccountURL(region string) string {
+	routingValues := map[string]string{
+		"BR1":  "americas",
+		"LA1":  "americas",
+		"LA2":  "americas",
+		"NA1":  "americas",
+		"EUW1": "europe",
+		"EUN1": "europe",
+		"TR1":  "europe",
+		"RU":   "europe",
+		"KR":   "asia",
+		"JP1":  "asia",
+		"OC1":  "sea",
+		"PH2":  "sea",
+		"SG2":  "sea",
+		"TH2":  "sea",
+		"TW2":  "sea",
+		"VN2":  "sea",
+	}
+	
+	routing := routingValues[region]
+	if routing == "" {
+		routing = "americas"
+	}
+	
+	return fmt.Sprintf("https://%s.api.riotgames.com", routing)
+}
+
 func (c *RiotAPIClient) SetNATSClient(natsClient *NATSClient) {
 	c.NATSClient = natsClient
 }
 
-func (c *RiotAPIClient) doRequest(path string) ([]byte, error) {
-	url := fmt.Sprintf("%s%s", c.BaseURL, path)
+func (c *RiotAPIClient) doRequest(url string) ([]byte, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -67,8 +99,8 @@ func (c *RiotAPIClient) GetSummonerByPUUID(puuid string) (map[string]interface{}
 		return cachedResult, nil
 	}
 	
-	path := fmt.Sprintf("/tft/summoner/v1/summoners/by-puuid/%s", puuid)
-	data, err := c.doRequest(path)
+	url := fmt.Sprintf("%s/tft/summoner/v1/summoners/by-puuid/%s", c.BaseURL, puuid)
+	data, err := c.doRequest(url)
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +114,57 @@ func (c *RiotAPIClient) GetSummonerByPUUID(puuid string) (map[string]interface{}
 	return result, nil
 }
 
+func (c *RiotAPIClient) GetAccountByPUUID(puuid string) (*AccountData, error) {
+	ctx := context.Background()
+	cacheKey := c.CacheManager.GenerateKey("account_puuid", c.Region, puuid)
+	
+	var cachedResult AccountData
+	if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
+		return &cachedResult, nil
+	}
+	
+	url := fmt.Sprintf("%s/riot/account/v1/accounts/by-puuid/%s", c.AccountURL, puuid)
+	data, err := c.doRequest(url)
+	if err != nil {
+		return nil, err
+	}
+	
+	var result AccountData
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	
+	c.CacheManager.SetCachedData(ctx, cacheKey, result, 6*time.Hour)
+	return &result, nil
+}
+
+func (c *RiotAPIClient) GetAccountByGameName(gameName, tagLine string) (*AccountData, error) {
+	ctx := context.Background()
+	cacheKey := c.CacheManager.GenerateKey("account_name", c.Region, gameName, tagLine)
+	
+	var cachedResult AccountData
+	if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
+		return &cachedResult, nil
+	}
+	
+	encodedGameName := url.QueryEscape(gameName)
+	encodedTagLine := url.QueryEscape(tagLine)
+	
+	url := fmt.Sprintf("%s/riot/account/v1/accounts/by-riot-id/%s/%s", c.AccountURL, encodedGameName, encodedTagLine)
+	data, err := c.doRequest(url)
+	if err != nil {
+		return nil, err
+	}
+	
+	var result AccountData
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	
+	c.CacheManager.SetCachedData(ctx, cacheKey, result, 6*time.Hour)
+	return &result, nil
+}
+
 func (c *RiotAPIClient) GetSummonerByID(id string) (*Summoner, error) {
 	ctx := context.Background()
 	cacheKey := c.CacheManager.GenerateKey("summoner_id", c.Region, id)
@@ -89,8 +172,8 @@ func (c *RiotAPIClient) GetSummonerByID(id string) (*Summoner, error) {
 	if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cached); err == nil {
 		return &cached, nil
 	}
-	path := fmt.Sprintf("/tft/summoner/v1/summoners/%s", id)
-	data, err := c.doRequest(path)
+	url := fmt.Sprintf("%s/tft/summoner/v1/summoners/%s", c.BaseURL, id)
+	data, err := c.doRequest(url)
 	if err != nil {
 		return nil, err
 	}
@@ -113,8 +196,8 @@ func (c *RiotAPIClient) GetChallengerLeague() (*ChallengerLeague, error) {
 		return &cachedResult, nil
 	}
 	
-	path := "/tft/league/v1/challenger"
-	data, err := c.doRequest(path)
+	url := fmt.Sprintf("%s/tft/league/v1/challenger", c.BaseURL)
+	data, err := c.doRequest(url)
 	if err != nil {
 		return nil, err
 	}
@@ -140,8 +223,8 @@ func (c *RiotAPIClient) GetGrandmasterLeague() (*GrandmasterLeague, error) {
 		return &cachedResult, nil
 	}
 	
-	path := "/tft/league/v1/grandmaster"
-	data, err := c.doRequest(path)
+	url := fmt.Sprintf("%s/tft/league/v1/grandmaster", c.BaseURL)
+	data, err := c.doRequest(url)
 	if err != nil {
 		return nil, err
 	}
@@ -167,8 +250,8 @@ func (c *RiotAPIClient) GetMasterLeague() (*MasterLeague, error) {
 		return &cachedResult, nil
 	}
 	
-	path := "/tft/league/v1/master"
-	data, err := c.doRequest(path)
+	url := fmt.Sprintf("%s/tft/league/v1/master", c.BaseURL)
+	data, err := c.doRequest(url)
 	if err != nil {
 		return nil, err
 	}
@@ -194,8 +277,8 @@ func (c *RiotAPIClient) GetLeagueEntries(tier, division string, page int) (*Leag
 		return &cachedResult, nil
 	}
 	
-	path := fmt.Sprintf("/tft/league/v1/entries/%s/%s?page=%d", tier, division, page)
-	data, err := c.doRequest(path)
+	url := fmt.Sprintf("%s/tft/league/v1/entries/%s/%s?page=%d", c.BaseURL, tier, division, page)
+	data, err := c.doRequest(url)
 	if err != nil {
 		return nil, err
 	}
@@ -228,8 +311,8 @@ func (c *RiotAPIClient) GetLeagueByPUUID(puuid string) ([]LeagueEntry, error) {
 		return cachedResult, nil
 	}
 	
-	path := fmt.Sprintf("/tft/league/v1/by-puuid/%s", puuid)
-	data, err := c.doRequest(path)
+	url := fmt.Sprintf("%s/tft/league/v1/by-puuid/%s", c.BaseURL, puuid)
+	data, err := c.doRequest(url)
 	if err != nil {
 		return nil, err
 	}
@@ -252,8 +335,8 @@ func (c *RiotAPIClient) GetMatchByID(matchId string) (map[string]interface{}, er
 		return cachedResult, nil
 	}
 	
-	path := fmt.Sprintf("/tft/match/v1/matches/%s", matchId)
-	data, err := c.doRequest(path)
+	url := fmt.Sprintf("%s/tft/match/v1/matches/%s", c.BaseURL, matchId)
+	data, err := c.doRequest(url)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +353,6 @@ func (c *RiotAPIClient) GetMatchByID(matchId string) (map[string]interface{}, er
 func (c *RiotAPIClient) enrichLeagueEntriesNames(entries []LeagueEntry) []LeagueEntry {
 	ctx := context.Background()
 	
-	// Limitar a 10 entries para otimizar performance
 	maxEntries := 10
 	if len(entries) > maxEntries {
 		entries = entries[:maxEntries]
@@ -285,7 +367,6 @@ func (c *RiotAPIClient) enrichLeagueEntriesNames(entries []LeagueEntry) []League
 		if lookups >= maxLookups {
 			log.Printf("Atingido limite de lookups (%d), enviando resto para workers", maxLookups)
 			
-			// Enviar os restantes para workers NATS
 			for j := i; j < len(entries); j++ {
 				entry := &entries[j]
 				puuid := entry.GetUniqueID()
@@ -347,31 +428,4 @@ func (c *RiotAPIClient) enrichLeagueEntriesNames(entries []LeagueEntry) []League
 
 	log.Printf("Enrichment concluído. Realizados %d lookups para TOP %d", lookups, len(entries))
 	return entries
-}
-
-func (c *RiotAPIClient) GetAccountByGameName(gameName, tagLine string) (*AccountData, error) {
-	ctx := context.Background()
-	cacheKey := c.CacheManager.GenerateKey("account_name", c.Region, gameName, tagLine)
-	
-	var cachedResult AccountData
-	if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
-		return &cachedResult, nil
-	}
-	
-	encodedGameName := url.QueryEscape(gameName)
-	encodedTagLine := url.QueryEscape(tagLine)
-	
-	url := fmt.Sprintf("%s/riot/account/v1/accounts/by-riot-id/%s/%s", c.AccountURL, encodedGameName, encodedTagLine)
-	data, err := c.doRequest(url)
-	if err != nil {
-		return nil, err
-	}
-	
-	var result AccountData
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, err
-	}
-	
-	c.CacheManager.SetCachedData(ctx, cacheKey, result, 6*time.Hour)
-	return &result, nil
 }

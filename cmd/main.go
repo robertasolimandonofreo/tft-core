@@ -85,106 +85,6 @@ func summonerHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
-func setupRoutes() {
-	http.HandleFunc("/healthz", withCORS(healthzHandler))
-	http.HandleFunc("/summoner", withCORS(summonerHandler))
-	
-	http.HandleFunc("/league/challenger", withCORS(internal.NewChallengerHandler(riotClient, ratelimiter)))
-	http.HandleFunc("/league/grandmaster", withCORS(internal.NewGrandmasterHandler(riotClient, ratelimiter)))
-	http.HandleFunc("/league/master", withCORS(internal.NewMasterHandler(riotClient, ratelimiter)))
-	http.HandleFunc("/league/entries", withCORS(internal.NewEntriesHandler(riotClient, ratelimiter)))
-	http.HandleFunc("/league/by-puuid", withCORS(internal.NewLeagueByPUUIDHandler(riotClient, ratelimiter)))
-}
-
-func scheduleLeagueUpdates() {
-	ticker := time.NewTicker(30 * time.Minute)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				tasks := []internal.LeagueUpdateTask{
-					{Type: "challenger", Region: cfg.RiotRegion},
-					{Type: "grandmaster", Region: cfg.RiotRegion},
-					{Type: "master", Region: cfg.RiotRegion},
-				}
-				
-				for _, task := range tasks {
-					if err := natsClient.PublishLeagueUpdateTask(task); err != nil {
-						log.Printf("Error publishing league update task: %v", err)
-					}
-				}
-			}
-		}
-	}()
-	log.Println("League update scheduler started")
-}
-
-func main() {
-	cfg = internal.LoadConfig()
-
-	ratelimiter = internal.NewRateLimiter(cfg, 100, 10*time.Second)
-
-	cacheManager = internal.NewCacheManager(cfg)
-
-	riotClient = internal.NewRiotAPIClient(cfg, cacheManager)
-
-	var err error
-	natsClient, err = internal.NewNATSClient(cfg)
-	if err != nil {
-		log.Fatalf("Error connecting to NATS: %v", err)
-	}
-	defer natsClient.Conn.Close()
-
-	_, err = natsClient.StartSummonerFetchWorker(func(msg *nats.Msg) {
-		log.Printf("Message received in summoner worker: %s", string(msg.Data))
-	})
-	if err != nil {
-		log.Fatalf("Error starting summoner NATS worker: %v", err)
-	}
-
-	_, err = natsClient.StartLeagueUpdateWorker(riotClient, cacheManager)
-	if err != nil {
-		log.Fatalf("Error starting league NATS worker: %v", err)
-	}
-
-	setupRoutes()
-	scheduleLeagueUpdates()
-
-	port := cfg.AppPort
-	if port == "" {
-		port = "8000"
-	}
-
-	server := &http.Server{
-		Addr:         ":" + port,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
-
-	go func() {
-		log.Printf("Server starting on port %s", port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Error starting server: %v", err)
-		}
-	}()
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	log.Println("Shutting down server...")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
-	}
-
-	log.Println("Server exited")
-}
-
 func searchPlayerHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	gameName := r.URL.Query().Get("gameName")
@@ -246,4 +146,100 @@ func setupRoutes() {
 	http.HandleFunc("/league/master", withCORS(internal.NewMasterHandler(riotClient, ratelimiter)))
 	http.HandleFunc("/league/entries", withCORS(internal.NewEntriesHandler(riotClient, ratelimiter)))
 	http.HandleFunc("/league/by-puuid", withCORS(internal.NewLeagueByPUUIDHandler(riotClient, ratelimiter)))
+}
+
+func scheduleLeagueUpdates() {
+	ticker := time.NewTicker(30 * time.Minute)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				tasks := []internal.LeagueUpdateTask{
+					{Type: "challenger", Region: cfg.RiotRegion},
+					{Type: "grandmaster", Region: cfg.RiotRegion},
+					{Type: "master", Region: cfg.RiotRegion},
+				}
+				
+				for _, task := range tasks {
+					if err := natsClient.PublishLeagueUpdateTask(task); err != nil {
+						log.Printf("Error publishing league update task: %v", err)
+					}
+				}
+			}
+		}
+	}()
+	log.Println("League update scheduler started")
+}
+
+func main() {
+	cfg = internal.LoadConfig()
+
+	ratelimiter = internal.NewRateLimiter(cfg, 100, 10*time.Second)
+
+	cacheManager = internal.NewCacheManager(cfg)
+
+	riotClient = internal.NewRiotAPIClient(cfg, cacheManager)
+
+	var err error
+	natsClient, err = internal.NewNATSClient(cfg)
+	if err != nil {
+		log.Fatalf("Error connecting to NATS: %v", err)
+	}
+	defer natsClient.Conn.Close()
+
+	riotClient.SetNATSClient(natsClient)
+
+	_, err = natsClient.StartSummonerFetchWorker(func(msg *nats.Msg) {
+		log.Printf("Message received in summoner worker: %s", string(msg.Data))
+	})
+	if err != nil {
+		log.Fatalf("Error starting summoner NATS worker: %v", err)
+	}
+
+	_, err = natsClient.StartLeagueUpdateWorker(riotClient, cacheManager)
+	if err != nil {
+		log.Fatalf("Error starting league NATS worker: %v", err)
+	}
+
+	_, err = natsClient.StartSummonerNameWorker(riotClient, cacheManager)
+	if err != nil {
+		log.Fatalf("Error starting summoner name NATS worker: %v", err)
+	}
+
+	setupRoutes()
+	scheduleLeagueUpdates()
+
+	port := cfg.AppPort
+	if port == "" {
+		port = "8000"
+	}
+
+	server := &http.Server{
+		Addr:         ":" + port,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	go func() {
+		log.Printf("Server starting on port %s", port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Error starting server: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	log.Println("Server exited")
 }

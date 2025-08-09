@@ -184,31 +184,33 @@ func main() {
 	var err error
 	natsClient, err = internal.NewNATSClient(cfg)
 	if err != nil {
-		log.Fatalf("Error connecting to NATS: %v", err)
-	}
-	defer natsClient.Conn.Close()
+		log.Printf("Warning: Error connecting to NATS: %v", err)
+	} else {
+		defer natsClient.Conn.Close()
+		
+		riotClient.SetNATSClient(natsClient)
 
-	riotClient.SetNATSClient(natsClient)
+		_, err = natsClient.StartSummonerFetchWorker(func(msg *nats.Msg) {
+			log.Printf("Message received in summoner worker: %s", string(msg.Data))
+		})
+		if err != nil {
+			log.Printf("Warning: Error starting summoner NATS worker: %v", err)
+		}
 
-	_, err = natsClient.StartSummonerFetchWorker(func(msg *nats.Msg) {
-		log.Printf("Message received in summoner worker: %s", string(msg.Data))
-	})
-	if err != nil {
-		log.Fatalf("Error starting summoner NATS worker: %v", err)
-	}
+		_, err = natsClient.StartSummonerNameWorker(riotClient, cacheManager)
+		if err != nil {
+			log.Printf("Warning: Error starting summoner name NATS worker: %v", err)
+		}
 
-	_, err = natsClient.StartLeagueUpdateWorker(riotClient, cacheManager)
-	if err != nil {
-		log.Fatalf("Error starting league NATS worker: %v", err)
-	}
+		_, err = natsClient.StartLeagueUpdateWorker(riotClient, cacheManager)
+		if err != nil {
+			log.Printf("Warning: Error starting league NATS worker: %v", err)
+		}
 
-	_, err = natsClient.StartSummonerNameWorker(riotClient, cacheManager)
-	if err != nil {
-		log.Fatalf("Error starting summoner name NATS worker: %v", err)
+		scheduleLeagueUpdates()
 	}
 
 	setupRoutes()
-	scheduleLeagueUpdates()
 
 	port := cfg.AppPort
 	if port == "" {

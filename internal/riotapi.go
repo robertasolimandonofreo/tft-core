@@ -179,12 +179,19 @@ func (c *RiotAPIClient) GetChallengerLeague() (*ChallengerLeague, error) {
 	ctx := context.Background()
 	cacheKey := c.CacheManager.GenerateKey("challenger", c.Region)
 	
-	// 🚨 FORÇAR NOVA BUSCA - REMOVER CACHE TEMPORARIAMENTE PARA DEBUG
-	// var cachedResult ChallengerLeague
-	// if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
-	// 	cachedResult.Entries = c.enrichLeagueEntriesNames(cachedResult.Entries)
-	// 	return &cachedResult, nil
-	// }
+	var cachedResult ChallengerLeague
+	if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
+		log.Printf("💾 Cache hit Challenger: %d entries", len(cachedResult.Entries))
+		if len(cachedResult.Entries) > 10 {
+			cachedResult.Entries = cachedResult.Entries[:10]
+		}
+		// ✅ GARANTIR QUE CADA ENTRY TENHA O TIER CORRETO
+		for i := range cachedResult.Entries {
+			cachedResult.Entries[i].Tier = "CHALLENGER"
+		}
+		cachedResult.Entries = c.enrichLeagueEntriesNames(cachedResult.Entries)
+		return &cachedResult, nil
+	}
 	
 	url := fmt.Sprintf("%s/tft/league/v1/challenger", c.BaseURL)
 	data, err := c.doRequest(url)
@@ -192,19 +199,29 @@ func (c *RiotAPIClient) GetChallengerLeague() (*ChallengerLeague, error) {
 		return nil, err
 	}
 	
-	log.Printf("🔍 Raw API Response (primeiros 500 chars): %s", string(data)[:min(500, len(data))])
+	log.Printf("🔍 Raw Challenger API Response (primeiros 500 chars): %s", string(data)[:min(500, len(data))])
 	
 	var result ChallengerLeague
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, err
 	}
 	
-	// Debug: verificar entries antes do enrichment
-	log.Printf("📊 Entries antes do enrichment: %d", len(result.Entries))
+	log.Printf("📊 Challenger API response: %d entries", len(result.Entries))
+	
+	if len(result.Entries) > 10 {
+		log.Printf("🔪 Cortando Challenger de %d para TOP 10", len(result.Entries))
+		result.Entries = result.Entries[:10]
+	}
+	
+	// ✅ GARANTIR QUE CADA ENTRY TENHA O TIER CORRETO
+	for i := range result.Entries {
+		result.Entries[i].Tier = "CHALLENGER"
+		log.Printf("🏆 Challenger Entry %d tier: %s, PUUID: %s", i, result.Entries[i].Tier, result.Entries[i].PUUID[:30]+"...")
+	}
+	
 	if len(result.Entries) > 0 {
 		firstEntry := result.Entries[0]
-		log.Printf("🔍 Primeiro entry - PUUID: %s, SummonerID: %s", firstEntry.PUUID, firstEntry.SummonerID)
-		log.Printf("🔍 Primeiro entry completo: %+v", firstEntry)
+		log.Printf("🔍 Primeiro Challenger entry - Tier: %s, PUUID: %s, SummonerID: %s", firstEntry.Tier, firstEntry.PUUID, firstEntry.SummonerID)
 	}
 	
 	result.Entries = c.enrichLeagueEntriesNames(result.Entries)
@@ -223,7 +240,19 @@ func (c *RiotAPIClient) GetGrandmasterLeague() (*GrandmasterLeague, error) {
 	ctx := context.Background()
 	cacheKey := c.CacheManager.GenerateKey("grandmaster", c.Region)
 	
-	// 🚨 CACHE DESABILITADO PARA DEBUG
+	var cachedResult GrandmasterLeague
+	if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
+		log.Printf("💾 Cache hit Grandmaster: %d entries", len(cachedResult.Entries))
+		if len(cachedResult.Entries) > 10 {
+			cachedResult.Entries = cachedResult.Entries[:10]
+		}
+		// ✅ GARANTIR QUE CADA ENTRY TENHA O TIER CORRETO
+		for i := range cachedResult.Entries {
+			cachedResult.Entries[i].Tier = "GRANDMASTER"
+		}
+		cachedResult.Entries = c.enrichLeagueEntriesNames(cachedResult.Entries)
+		return &cachedResult, nil
+	}
 	
 	url := fmt.Sprintf("%s/tft/league/v1/grandmaster", c.BaseURL)
 	data, err := c.doRequest(url)
@@ -236,9 +265,21 @@ func (c *RiotAPIClient) GetGrandmasterLeague() (*GrandmasterLeague, error) {
 		return nil, err
 	}
 	
-	log.Printf("📊 Grandmaster entries: %d", len(result.Entries))
+	log.Printf("📊 Grandmaster API response: %d entries", len(result.Entries))
+	
+	if len(result.Entries) > 10 {
+		log.Printf("🔪 Cortando Grandmaster de %d para TOP 10", len(result.Entries))
+		result.Entries = result.Entries[:10]
+	}
+	
+	// ✅ GARANTIR QUE CADA ENTRY TENHA O TIER CORRETO
+	for i := range result.Entries {
+		result.Entries[i].Tier = "GRANDMASTER"
+		log.Printf("🏆 Grandmaster Entry %d tier: %s", i, result.Entries[i].Tier)
+	}
+	
 	if len(result.Entries) > 0 {
-		log.Printf("🔍 GM primeiro entry PUUID: %s", result.Entries[0].PUUID)
+		log.Printf("🔍 GM primeiro entry - Tier: %s, PUUID: %s", result.Entries[0].Tier, result.Entries[0].PUUID)
 	}
 	
 	result.Entries = c.enrichLeagueEntriesNames(result.Entries)
@@ -250,7 +291,19 @@ func (c *RiotAPIClient) GetMasterLeague() (*MasterLeague, error) {
 	ctx := context.Background()
 	cacheKey := c.CacheManager.GenerateKey("master", c.Region)
 	
-	// 🚨 CACHE DESABILITADO PARA DEBUG
+	var cachedResult MasterLeague
+	if err := c.CacheManager.GetCachedData(ctx, cacheKey, &cachedResult); err == nil {
+		log.Printf("💾 Cache hit Master: %d entries", len(cachedResult.Entries))
+		if len(cachedResult.Entries) > 10 {
+			cachedResult.Entries = cachedResult.Entries[:10]
+		}
+		// ✅ GARANTIR QUE CADA ENTRY TENHA O TIER CORRETO
+		for i := range cachedResult.Entries {
+			cachedResult.Entries[i].Tier = "MASTER"
+		}
+		cachedResult.Entries = c.enrichLeagueEntriesNames(cachedResult.Entries)
+		return &cachedResult, nil
+	}
 	
 	url := fmt.Sprintf("%s/tft/league/v1/master", c.BaseURL)
 	data, err := c.doRequest(url)
@@ -263,9 +316,21 @@ func (c *RiotAPIClient) GetMasterLeague() (*MasterLeague, error) {
 		return nil, err
 	}
 	
-	log.Printf("📊 Master entries: %d", len(result.Entries))
+	log.Printf("📊 Master API response: %d entries", len(result.Entries))
+	
+	if len(result.Entries) > 10 {
+		log.Printf("🔪 Cortando Master de %d para TOP 10", len(result.Entries))
+		result.Entries = result.Entries[:10]
+	}
+	
+	// ✅ GARANTIR QUE CADA ENTRY TENHA O TIER CORRETO
+	for i := range result.Entries {
+		result.Entries[i].Tier = "MASTER"
+		log.Printf("🏆 Master Entry %d tier: %s", i, result.Entries[i].Tier)
+	}
+	
 	if len(result.Entries) > 0 {
-		log.Printf("🔍 Master primeiro entry PUUID: %s", result.Entries[0].PUUID)
+		log.Printf("🔍 Master primeiro entry - Tier: %s, PUUID: %s", result.Entries[0].Tier, result.Entries[0].PUUID)
 	}
 	
 	result.Entries = c.enrichLeagueEntriesNames(result.Entries)
@@ -359,47 +424,46 @@ func (c *RiotAPIClient) GetMatchByID(matchId string) (map[string]interface{}, er
 func (c *RiotAPIClient) enrichLeagueEntriesNames(entries []LeagueEntry) []LeagueEntry {
 	ctx := context.Background()
 	
-	// 🏆 LIMITAR A TOP 10 para melhor performance
+	// 🏆 LIMITAÇÃO FIXA PARA TOP 10
 	totalEntries := len(entries)
 	maxEntries := 10
 	if totalEntries > maxEntries {
-		log.Printf("🏆 Limitando para TOP %d entries (de %d)", maxEntries, totalEntries)
+		log.Printf("🏆 Limitando para TOP %d entries (de %d total)", maxEntries, totalEntries)
 		entries = entries[:maxEntries]
 	}
 	
 	lookups := 0
-	maxLookups := 10 // Suficiente para TOP 10
+	maxLookups := 10 // Exato para TOP 10
 	cacheHits := 0
 	errors := 0
 
-	log.Printf("🚀 Iniciando enrichment TOP %d entries (limite: %d lookups)", len(entries), maxLookups)
+	log.Printf("🚀 Iniciando enrichment TOP %d entries", len(entries))
 
 	for i := range entries {
 		entry := &entries[i]
+
+		log.Printf("Entry %d: 🔍 Tier atual: %s, PUUID: %s", i, entry.Tier, entry.PUUID[:30]+"...")
 
 		if entry.SummonerName != "" && entry.SummonerName != "Unknown" {
 			continue
 		}
 
-		// ✅ TFT API retorna PUUID diretamente
 		puuid := entry.PUUID
 		if puuid == "" {
 			log.Printf("Entry %d: ❌ PUUID vazio", i)
 			continue
 		}
 
-		log.Printf("Entry %d: 🔍 PUUID encontrado: %s", i, puuid[:30]+"...")
-
-		// Verificar cache
+		// Verificar cache primeiro
 		if cachedName, err := c.CacheManager.GetSummonerName(ctx, puuid); err == nil && cachedName != "" {
 			entry.SummonerName = cachedName
 			cacheHits++
-			log.Printf("Entry %d: 💾 Nome do cache: %s", i, cachedName)
+			log.Printf("Entry %d: 💾 Cache hit: %s (Tier: %s)", i, cachedName, entry.Tier)
 			continue
 		}
 
 		if lookups >= maxLookups {
-			log.Printf("Entry %d: ⏸️ Limite de lookups atingido (%d), usando workers", i, maxLookups)
+			log.Printf("Entry %d: ⏸️ Limite atingido, usando worker async", i)
 			
 			if c.NATSClient != nil {
 				go func(puuidCopy string) {
@@ -410,22 +474,20 @@ func (c *RiotAPIClient) enrichLeagueEntriesNames(entries []LeagueEntry) []League
 		}
 
 		if lookups > 0 {
-			time.Sleep(180 * time.Millisecond) // Rate limiting
+			time.Sleep(150 * time.Millisecond) // Rate limiting otimizado
 		}
 		
-		// 🎯 Buscar nome diretamente via PUUID → Account API
-		log.Printf("Entry %d: 🌐 Buscando nome via Account API...", i)
+		log.Printf("Entry %d: 🌐 Buscando via Account API...", i)
 		name := c.fetchNameDirectlyViaPUUID(puuid)
 		
 		if name != "" {
 			entry.SummonerName = name
 			c.CacheManager.SetSummonerName(ctx, puuid, name)
-			log.Printf("Entry %d: ✅ Nome obtido: %s", i, name)
+			log.Printf("Entry %d: ✅ Nome obtido: %s (Tier: %s)", i, name, entry.Tier)
 		} else {
-			log.Printf("Entry %d: ❌ Falha ao obter nome", i)
+			log.Printf("Entry %d: ❌ Erro ao obter nome", i)
 			errors++
 			
-			// Tentar async
 			if c.NATSClient != nil {
 				go func(puuidCopy string) {
 					c.fetchNameAsyncViaPUUID(puuidCopy)
@@ -442,8 +504,8 @@ func (c *RiotAPIClient) enrichLeagueEntriesNames(entries []LeagueEntry) []League
 		}
 	}
 
-	log.Printf("🏁 TOP %d Enrichment concluído - Nomes: %d, Cache: %d, Lookups: %d, Erros: %d", 
-		len(entries), successfulNames, cacheHits, lookups, errors)
+	log.Printf("🏁 TOP %d Enrichment concluído - Nomes: %d/%d, Cache: %d, Lookups: %d, Erros: %d", 
+		len(entries), successfulNames, len(entries), cacheHits, lookups, errors)
 	
 	return entries
 }

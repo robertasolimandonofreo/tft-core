@@ -17,6 +17,13 @@ type LeagueEntry struct {
 	MiniSeries   *MiniSeries `json:"miniSeries,omitempty"`
 }
 
+func (le *LeagueEntry) GetUniqueID() string {
+	if le.SummonerID != "" {
+		return le.SummonerID
+	}
+	return ""
+}
+
 type MiniSeries struct {
 	Target   int    `json:"target"`
 	Wins     int    `json:"wins"`
@@ -48,7 +55,6 @@ type MasterLeague struct {
 	Queue    string        `json:"queue"`
 }
 
-
 type LeagueEntriesResponse struct {
 	Entries  []LeagueEntry `json:"entries"`
 	Page     int           `json:"page"`
@@ -65,12 +71,23 @@ type LeagueUpdateTask struct {
 	Page     int    `json:"page,omitempty"`
 }
 
+type SummonerNameTask struct {
+	PUUID  string `json:"puuid"`
+	Region string `json:"region"`
+}
+
 type Summoner struct {
-    ID            string `json:"id"`
-    AccountID     string `json:"accountId"`
-    PUUID         string `json:"puuid"`
-    Name          string `json:"name"`
-    ProfileIconID int    `json:"profileIconId"`
-    RevisionDate  int64  `json:"revisionDate"`
-    SummonerLevel int    `json:"summonerLevel"`
+	ID            string `json:"id"`
+	AccountID     string `json:"accountId"`
+	PUUID         string `json:"puuid"`
+	Name          string `json:"name"`
+	ProfileIconID int    `json:"profileIconId"`
+	RevisionDate  int64  `json:"revisionDate"`
+	SummonerLevel int    `json:"summonerLevel"`
+}
+
+type AccountData struct {
+	PUUID    string `json:"puuid"`
+	GameName string `json:"gameName"`
+	TagLine  string `json:"tagLine"`
 }

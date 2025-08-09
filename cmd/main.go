@@ -184,3 +184,66 @@ func main() {
 
 	log.Println("Server exited")
 }
+
+func searchPlayerHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	gameName := r.URL.Query().Get("gameName")
+	tagLine := r.URL.Query().Get("tagLine")
+	
+	if gameName == "" {
+		http.Error(w, "gameName is required", http.StatusBadRequest)
+		return
+	}
+	
+	if tagLine == "" {
+		tagLine = "BR1"
+	}
+	
+	allowed, err := ratelimiter.Allow(ctx, "search:"+gameName+":"+tagLine)
+	if err != nil {
+		log.Printf("Rate limiter error: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !allowed {
+		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+	
+	accountData, err := riotClient.GetAccountByGameName(gameName, tagLine)
+	if err != nil {
+		log.Printf("Error finding account: %v", err)
+		http.Error(w, "Player not found", http.StatusNotFound)
+		return
+	}
+	
+	summonerData, err := riotClient.GetSummonerByPUUID(accountData.PUUID)
+	if err != nil {
+		log.Printf("Error fetching summoner data: %v", err)
+		http.Error(w, "Failed to fetch player data", http.StatusBadGateway)
+		return
+	}
+	
+	result := map[string]interface{}{
+		"account":  accountData,
+		"summoner": summonerData,
+		"puuid":    accountData.PUUID,
+		"gameName": accountData.GameName,
+		"tagLine":  accountData.TagLine,
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func setupRoutes() {
+	http.HandleFunc("/healthz", withCORS(healthzHandler))
+	http.HandleFunc("/summoner", withCORS(summonerHandler))
+	http.HandleFunc("/search/player", withCORS(searchPlayerHandler))
+	
+	http.HandleFunc("/league/challenger", withCORS(internal.NewChallengerHandler(riotClient, ratelimiter)))
+	http.HandleFunc("/league/grandmaster", withCORS(internal.NewGrandmasterHandler(riotClient, ratelimiter)))
+	http.HandleFunc("/league/master", withCORS(internal.NewMasterHandler(riotClient, ratelimiter)))
+	http.HandleFunc("/league/entries", withCORS(internal.NewEntriesHandler(riotClient, ratelimiter)))
+	http.HandleFunc("/league/by-puuid", withCORS(internal.NewLeagueByPUUIDHandler(riotClient, ratelimiter)))
+}

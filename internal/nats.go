@@ -1,7 +1,9 @@
 package internal
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
@@ -33,6 +35,14 @@ func (nc *NATSClient) PublishLeagueUpdateTask(task LeagueUpdateTask) error {
 		return err
 	}
 	return nc.Publish("tft.league.update", data)
+}
+
+func (nc *NATSClient) PublishSummonerNameTask(task SummonerNameTask) error {
+	data, err := json.Marshal(task)
+	if err != nil {
+		return err
+	}
+	return nc.Publish("tft.summoner.name.fetch", data)
 }
 
 func (nc *NATSClient) StartSummonerFetchWorker(handler func(msg *nats.Msg)) (*nats.Subscription, error) {
@@ -81,6 +91,53 @@ func (nc *NATSClient) StartLeagueUpdateWorker(riotClient *RiotAPIClient, cacheMa
 		return nil, err
 	}
 	log.Println("League Update Worker started, waiting for messages...")
+	return sub, nil
+}
+
+func (nc *NATSClient) StartSummonerNameWorker(riotClient *RiotAPIClient, cacheManager *CacheManager) (*nats.Subscription, error) {
+	handler := func(msg *nats.Msg) {
+		var task SummonerNameTask
+		if err := json.Unmarshal(msg.Data, &task); err != nil {
+			log.Printf("Error unmarshaling summoner name task: %v", err)
+			return
+		}
+		
+		log.Printf("Processing summoner name task: PUUID=%s", task.PUUID[:30]+"...")
+		
+		ctx := context.Background()
+		
+		if cachedName, err := cacheManager.GetSummonerName(ctx, task.PUUID); err == nil && cachedName != "" {
+			log.Printf("Nome já existe no cache para PUUID %s: %s", task.PUUID[:30]+"...", cachedName)
+			return
+		}
+		
+		accountData, err := riotClient.GetAccountByPUUID(task.PUUID)
+		if err != nil {
+			log.Printf("Error fetching account data for PUUID %s: %v", task.PUUID[:30]+"...", err)
+			return
+		}
+		
+		if accountData.GameName != "" {
+			fullName := accountData.GameName
+			if accountData.TagLine != "" {
+				fullName = fmt.Sprintf("%s#%s", accountData.GameName, accountData.TagLine)
+			}
+			
+			if err := cacheManager.SetSummonerName(ctx, task.PUUID, fullName); err != nil {
+				log.Printf("Error caching summoner name: %v", err)
+			} else {
+				log.Printf("Nome cacheado com sucesso: PUUID=%s, Nome=%s", task.PUUID[:30]+"...", fullName)
+			}
+		} else {
+			log.Printf("GameName não encontrado nos dados da account: %+v", accountData)
+		}
+	}
+	
+	sub, err := nc.Conn.QueueSubscribe("tft.summoner.name.fetch", "name-workers", handler)
+	if err != nil {
+		return nil, err
+	}
+	log.Println("Summoner Name Worker started, waiting for messages...")
 	return sub, nil
 }
 

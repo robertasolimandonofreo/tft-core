@@ -79,3 +79,21 @@ func (cm *CacheManager) DeletePattern(ctx context.Context, pattern string) error
 	
 	return nil
 }
+
+func (cm *CacheManager) GetSummonerName(ctx context.Context, id string) (string, error) {
+	if !cm.Enabled {
+		return "", redis.Nil
+	}
+	
+	key := fmt.Sprintf("tft:summoner_name:%s", id)
+	return cm.RedisClient.Get(ctx, key).Result()
+}
+
+func (cm *CacheManager) SetSummonerName(ctx context.Context, id, name string) error {
+	if !cm.Enabled {
+		return nil
+	}
+	
+	key := fmt.Sprintf("tft:summoner_name:%s", id)
+	return cm.RedisClient.Set(ctx, key, name, 24*time.Hour).Err()
+}

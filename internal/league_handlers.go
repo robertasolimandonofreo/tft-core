@@ -176,3 +176,7 @@ func NewLeagueByPUUIDHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter
 		json.NewEncoder(w).Encode(result)
 	}
 }
+
+var summonerRateLimits = map[string]RateLimitConfig{
+    "summoner-by-id": {Limit: 1600, Window: 60 * time.Second},
+}

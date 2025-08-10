@@ -25,13 +25,8 @@ func NewChallengerHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter) h
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		
-		// Debug logs
-		fmt.Printf("Rate limiter config - Limit: %d, Window: %v\n", rateLimiter.Limit, rateLimiter.Window)
-		fmt.Printf("Redis client options: %+v\n", rateLimiter.RedisClient.Options())
-		
 		allowed, err := rateLimiter.Allow(ctx, "challenger")
 		if err != nil {
-			fmt.Printf("Rate limiter error details: %v\n", err)
 			http.Error(w, fmt.Sprintf("Rate limiter error: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -57,7 +52,6 @@ func NewGrandmasterHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter) 
 		
 		allowed, err := rateLimiter.Allow(ctx, "grandmaster")
 		if err != nil {
-			fmt.Printf("Grandmaster rate limiter error: %v\n", err)
 			http.Error(w, fmt.Sprintf("Rate limiter error: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -83,7 +77,6 @@ func NewMasterHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter) http.
 		
 		allowed, err := rateLimiter.Allow(ctx, "master")
 		if err != nil {
-			fmt.Printf("Master rate limiter error: %v\n", err)
 			http.Error(w, fmt.Sprintf("Rate limiter error: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -126,7 +119,6 @@ func NewEntriesHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter) http
 		
 		allowed, err := rateLimiter.Allow(ctx, rateLimitKey)
 		if err != nil {
-			fmt.Printf("Entries rate limiter error: %v\n", err)
 			http.Error(w, fmt.Sprintf("Rate limiter error: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -157,7 +149,6 @@ func NewLeagueByPUUIDHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter
 		ctx := r.Context()
 		allowed, err := rateLimiter.Allow(ctx, fmt.Sprintf("league:puuid:%s", puuid))
 		if err != nil {
-			fmt.Printf("League by PUUID rate limiter error: %v\n", err)
 			http.Error(w, fmt.Sprintf("Rate limiter error: %v", err), http.StatusInternalServerError)
 			return
 		}

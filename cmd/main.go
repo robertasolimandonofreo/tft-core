@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,14 +14,27 @@ import (
 func main() {
 	cfg, err := internal.LoadConfig()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		panic("Failed to load config: " + err.Error())
 	}
+
+	logger := internal.NewLogger(cfg)
+	metrics := internal.NewMetricsCollector(logger)
+	
+	logger.Info("service_starting").
+		Component("main").
+		Operation("startup").
+		Meta("port", cfg.AppPort).
+		Meta("environment", cfg.AppEnv).
+		Log()
 
 	var dbManager *internal.DatabaseManager
 	if cfg.DatabaseEnabled {
 		dbManager = internal.NewDatabaseManager(cfg)
 		if dbManager != nil {
 			defer dbManager.Close()
+			logger.Info("database_connected").Component("database").Log()
+		} else {
+			logger.Warn("database_connection_failed").Component("database").Log()
 		}
 	}
 
@@ -34,30 +46,53 @@ func main() {
 	if cfg.NATSUrl != "" {
 		natsClient, err = internal.NewNATSClient(cfg)
 		if err != nil {
-			log.Printf("Warning: NATS connection failed: %v", err)
+			logger.Error("nats_connection_failed").
+				Component("nats").
+				Err(err).
+				Log()
 		} else {
 			defer natsClient.Conn.Close()
 			riotClient.SetNATSClient(natsClient)
-			setupNATSWorkers(natsClient, riotClient, cacheManager)
-			scheduleLeagueUpdates(natsClient, cfg.RiotRegion)
+			setupNATSWorkers(natsClient, riotClient, cacheManager, logger)
+			scheduleLeagueUpdates(natsClient, cfg.RiotRegion, logger)
+			logger.Info("nats_connected").Component("nats").Log()
 		}
 	}
 
-	setupRoutes(riotClient, rateLimiter)
-	startServer(cfg.AppPort)
+	middleware := internal.NewLoggingMiddleware(logger, metrics)
+	setupRoutes(riotClient, rateLimiter, middleware, logger)
+	startServer(cfg.AppPort, logger)
 }
 
-func setupNATSWorkers(natsClient *internal.NATSClient, riotClient *internal.RiotAPIClient, cache *internal.CacheManager) {
+func setupNATSWorkers(natsClient *internal.NATSClient, riotClient *internal.RiotAPIClient, cache *internal.CacheManager, logger *internal.Logger) {
 	if _, err := natsClient.StartSummonerNameWorker(riotClient, cache); err != nil {
-		log.Printf("Warning: Failed to start summoner name worker: %v", err)
+		logger.Error("summoner_name_worker_failed").
+			Component("nats").
+			Operation("start_worker").
+			Err(err).
+			Log()
+	} else {
+		logger.Info("summoner_name_worker_started").
+			Component("nats").
+			Operation("start_worker").
+			Log()
 	}
 
 	if _, err := natsClient.StartLeagueUpdateWorker(riotClient, cache); err != nil {
-		log.Printf("Warning: Failed to start league update worker: %v", err)
+		logger.Error("league_update_worker_failed").
+			Component("nats").
+			Operation("start_worker").
+			Err(err).
+			Log()
+	} else {
+		logger.Info("league_update_worker_started").
+			Component("nats").
+			Operation("start_worker").
+			Log()
 	}
 }
 
-func scheduleLeagueUpdates(natsClient *internal.NATSClient, region string) {
+func scheduleLeagueUpdates(natsClient *internal.NATSClient, region string, logger *internal.Logger) {
 	ticker := time.NewTicker(30 * time.Minute)
 	go func() {
 		defer ticker.Stop()
@@ -70,26 +105,45 @@ func scheduleLeagueUpdates(natsClient *internal.NATSClient, region string) {
 
 			for _, task := range tasks {
 				if err := natsClient.PublishLeagueUpdateTask(task); err != nil {
-					log.Printf("Error publishing league update task: %v", err)
+					logger.Error("league_update_task_failed").
+						Component("nats").
+						Operation("publish_task").
+						Err(err).
+						Meta("task_type", task.Type).
+						Log()
+				} else {
+					logger.Debug("league_update_task_published").
+						Component("nats").
+						Operation("publish_task").
+						Meta("task_type", task.Type).
+						Log()
 				}
 			}
 		}
 	}()
-	log.Println("League update scheduler started")
+	
+	logger.Info("league_update_scheduler_started").
+		Component("scheduler").
+		Operation("start").
+		Meta("interval", "30m").
+		Log()
 }
 
-func setupRoutes(riotClient *internal.RiotAPIClient, rateLimiter *internal.RateLimiter) {
-	http.HandleFunc("/healthz", internal.HealthHandler())
-	http.HandleFunc("/summoner", internal.SummonerHandler(riotClient, rateLimiter))
-	http.HandleFunc("/search/player", internal.SearchPlayerHandler(riotClient, rateLimiter))
-	http.HandleFunc("/league/challenger", internal.ChallengerHandler(riotClient, rateLimiter))
-	http.HandleFunc("/league/grandmaster", internal.GrandmasterHandler(riotClient, rateLimiter))
-	http.HandleFunc("/league/master", internal.MasterHandler(riotClient, rateLimiter))
-	http.HandleFunc("/league/entries", internal.EntriesHandler(riotClient, rateLimiter))
-	http.HandleFunc("/league/by-puuid", internal.LeagueByPUUIDHandler(riotClient, rateLimiter))
+func setupRoutes(riotClient *internal.RiotAPIClient, rateLimiter *internal.RateLimiter, middleware *internal.LoggingMiddleware, logger *internal.Logger) {
+	http.HandleFunc("/healthz", middleware.Handler(internal.HealthHandler()))
+	http.HandleFunc("/summoner", middleware.Handler(internal.SummonerHandler(riotClient, rateLimiter)))
+	http.HandleFunc("/search/player", middleware.Handler(internal.SearchPlayerHandler(riotClient, rateLimiter)))
+	http.HandleFunc("/league/challenger", middleware.Handler(internal.ChallengerHandler(riotClient, rateLimiter)))
+	http.HandleFunc("/league/grandmaster", middleware.Handler(internal.GrandmasterHandler(riotClient, rateLimiter)))
+	http.HandleFunc("/league/master", middleware.Handler(internal.MasterHandler(riotClient, rateLimiter)))
+	http.HandleFunc("/league/entries", middleware.Handler(internal.EntriesHandler(riotClient, rateLimiter)))
+	http.HandleFunc("/league/by-puuid", middleware.Handler(internal.LeagueByPUUIDHandler(riotClient, rateLimiter)))
+	http.HandleFunc("/metrics", middleware.Handler(internal.MetricsHandler(logger)))
+	
+	logger.Info("routes_configured").Component("http").Log()
 }
 
-func startServer(port string) {
+func startServer(port string, logger *internal.Logger) {
 	if port == "" {
 		port = "8000"
 	}
@@ -102,9 +156,19 @@ func startServer(port string) {
 	}
 
 	go func() {
-		log.Printf("Server starting on port %s", port)
+		logger.Info("server_starting").
+			Component("http").
+			Operation("listen").
+			Meta("port", port).
+			Log()
+			
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server failed to start: %v", err)
+			logger.Error("server_start_failed").
+				Component("http").
+				Operation("listen").
+				Err(err).
+				Log()
+			os.Exit(1)
 		}
 	}()
 
@@ -112,13 +176,25 @@ func startServer(port string) {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down server...")
+	logger.Info("shutdown_signal_received").
+		Component("http").
+		Operation("shutdown").
+		Log()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+		logger.Error("server_shutdown_failed").
+			Component("http").
+			Operation("shutdown").
+			Err(err).
+			Log()
+		os.Exit(1)
 	}
 
-	log.Println("Server exited")
+	logger.Info("server_shutdown_completed").
+		Component("http").
+		Operation("shutdown").
+		Log()
 }

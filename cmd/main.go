@@ -279,3 +279,96 @@ func main() {
 
 	log.Println("Server exited")
 }
+
+func searchPlayerHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	gameName := r.URL.Query().Get("gameName")
+	tagLine := r.URL.Query().Get("tagLine")
+	
+	if gameName == "" {
+		http.Error(w, "gameName is required", http.StatusBadRequest)
+		return
+	}
+	
+	if tagLine == "" {
+		tagLine = "BR1"
+	}
+	
+	log.Printf("🔍 Search request: gameName='%s', tagLine='%s'", gameName, tagLine)
+	
+	allowed, err := ratelimiter.Allow(ctx, "search:"+gameName+":"+tagLine)
+	if err != nil {
+		log.Printf("Rate limiter error: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !allowed {
+		log.Printf("Rate limit exceeded for search: %s#%s", gameName, tagLine)
+		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+	
+	// Buscar dados da conta
+	accountData, err := riotClient.GetAccountByGameName(gameName, tagLine)
+	if err != nil {
+		log.Printf("Error finding account %s#%s: %v", gameName, tagLine, err)
+		
+		if strings.Contains(err.Error(), "404") {
+			http.Error(w, "Player not found", http.StatusNotFound)
+			return
+		}
+		
+		if strings.Contains(err.Error(), "403") {
+			http.Error(w, "API key invalid or expired", http.StatusServiceUnavailable)
+			return
+		}
+		
+		if strings.Contains(err.Error(), "429") {
+			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+		
+		http.Error(w, "Failed to fetch account data", http.StatusBadGateway)
+		return
+	}
+	
+	log.Printf("✅ Account found: %s#%s -> PUUID: %s", accountData.GameName, accountData.TagLine, accountData.PUUID)
+	
+	// Buscar dados do summoner
+	summonerData, err := riotClient.GetSummonerByPUUID(accountData.PUUID)
+	if err != nil {
+		log.Printf("Error fetching summoner data for PUUID %s: %v", accountData.PUUID, err)
+	}
+	
+	// Buscar dados da league (rank, winrate, etc.)
+	leagueData, err := riotClient.GetLeagueByPUUID(accountData.PUUID)
+	if err != nil {
+		log.Printf("Error fetching league data for PUUID %s: %v", accountData.PUUID, err)
+		// Não falhar se não conseguir league data
+	}
+	
+	// Processar dados da league para extrair informações do TFT
+	var tftLeague *internal.LeagueEntry
+	if leagueData != nil && len(leagueData) > 0 {
+		for _, entry := range leagueData {
+			if entry.QueueType == "RANKED_TFT" {
+				tftLeague = &entry
+				break
+			}
+		}
+	}
+	
+	result := map[string]interface{}{
+		"account":  accountData,
+		"summoner": summonerData,
+		"puuid":    accountData.PUUID,
+		"gameName": accountData.GameName,
+		"tagLine":  accountData.TagLine,
+		"league":   tftLeague,
+	}
+	
+	log.Printf("🎮 Search successful: %s#%s", accountData.GameName, accountData.TagLine)
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}

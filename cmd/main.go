@@ -2,119 +2,75 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-	"strings"
-	"github.com/nats-io/nats.go"
+
 	"github.com/robertasolimandonofreo/tft-core/internal"
 )
 
-var (
-	cfg          *internal.Config
-	ratelimiter  *internal.RateLimiter
-	riotClient   *internal.RiotAPIClient
-	natsClient   *internal.NATSClient
-	cacheManager *internal.CacheManager
-)
-
-func withCORS(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			origin = "*"
-		}
-		
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		h(w, r)
-	}
-}
-
-func healthzHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "ok",
-		"timestamp": time.Now().Unix(),
-		"services": map[string]string{
-			"redis": "connected",
-			"nats": "connected",
-		},
-	})
-}
-
-func summonerHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	puuid := r.URL.Query().Get("puuid")
-	if puuid == "" {
-		http.Error(w, "puuid is required", http.StatusBadRequest)
-		return
-	}
-	
-	allowed, err := ratelimiter.Allow(ctx, "summoner:"+puuid)
+func main() {
+	cfg, err := internal.LoadConfig()
 	if err != nil {
-		log.Printf("Rate limiter error: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+		log.Fatalf("Failed to load config: %v", err)
 	}
-	if !allowed {
-		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
-		return
+
+	var dbManager *internal.DatabaseManager
+	if cfg.DatabaseEnabled {
+		dbManager = internal.NewDatabaseManager(cfg)
+		if dbManager != nil {
+			defer dbManager.Close()
+		}
 	}
-	
-	result, err := riotClient.GetSummonerByPUUID(puuid)
-	if err != nil {
-		log.Printf("Riot API error: %v", err)
-		http.Error(w, "Failed to fetch summoner data", http.StatusBadGateway)
-		return
+
+	cacheManager := internal.NewCacheManager(cfg, dbManager)
+	rateLimiter := internal.NewRateLimiter(cfg)
+	riotClient := internal.NewRiotAPIClient(cfg, cacheManager)
+
+	var natsClient *internal.NATSClient
+	if cfg.NATSUrl != "" {
+		natsClient, err = internal.NewNATSClient(cfg)
+		if err != nil {
+			log.Printf("Warning: NATS connection failed: %v", err)
+		} else {
+			defer natsClient.Conn.Close()
+			riotClient.SetNATSClient(natsClient)
+			setupNATSWorkers(natsClient, riotClient, cacheManager)
+			scheduleLeagueUpdates(natsClient, cfg.RiotRegion)
+		}
 	}
-	
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+
+	setupRoutes(riotClient, rateLimiter)
+	startServer(cfg.AppPort)
 }
 
+func setupNATSWorkers(natsClient *internal.NATSClient, riotClient *internal.RiotAPIClient, cache *internal.CacheManager) {
+	if _, err := natsClient.StartSummonerNameWorker(riotClient, cache); err != nil {
+		log.Printf("Warning: Failed to start summoner name worker: %v", err)
+	}
 
-func setupRoutes() {
-	http.HandleFunc("/healthz", withCORS(healthzHandler))
-	http.HandleFunc("/summoner", withCORS(summonerHandler))
-	http.HandleFunc("/search/player", withCORS(searchPlayerHandler))
-	
-	http.HandleFunc("/league/challenger", withCORS(internal.NewChallengerHandler(riotClient, ratelimiter)))
-	http.HandleFunc("/league/grandmaster", withCORS(internal.NewGrandmasterHandler(riotClient, ratelimiter)))
-	http.HandleFunc("/league/master", withCORS(internal.NewMasterHandler(riotClient, ratelimiter)))
-	http.HandleFunc("/league/entries", withCORS(internal.NewEntriesHandler(riotClient, ratelimiter)))
-	http.HandleFunc("/league/by-puuid", withCORS(internal.NewLeagueByPUUIDHandler(riotClient, ratelimiter)))
+	if _, err := natsClient.StartLeagueUpdateWorker(riotClient, cache); err != nil {
+		log.Printf("Warning: Failed to start league update worker: %v", err)
+	}
 }
 
-func scheduleLeagueUpdates() {
+func scheduleLeagueUpdates(natsClient *internal.NATSClient, region string) {
 	ticker := time.NewTicker(30 * time.Minute)
 	go func() {
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				tasks := []internal.LeagueUpdateTask{
-					{Type: "challenger", Region: cfg.RiotRegion},
-					{Type: "grandmaster", Region: cfg.RiotRegion},
-					{Type: "master", Region: cfg.RiotRegion},
-				}
-				
-				for _, task := range tasks {
-					if err := natsClient.PublishLeagueUpdateTask(task); err != nil {
-						log.Printf("Error publishing league update task: %v", err)
-					}
+		for range ticker.C {
+			tasks := []internal.LeagueUpdateTask{
+				{Type: "challenger", Region: region},
+				{Type: "grandmaster", Region: region},
+				{Type: "master", Region: region},
+			}
+
+			for _, task := range tasks {
+				if err := natsClient.PublishLeagueUpdateTask(task); err != nil {
+					log.Printf("Error publishing league update task: %v", err)
 				}
 			}
 		}
@@ -122,47 +78,18 @@ func scheduleLeagueUpdates() {
 	log.Println("League update scheduler started")
 }
 
-func main() {
-	cfg = internal.LoadConfig()
+func setupRoutes(riotClient *internal.RiotAPIClient, rateLimiter *internal.RateLimiter) {
+	http.HandleFunc("/healthz", internal.HealthHandler())
+	http.HandleFunc("/summoner", internal.SummonerHandler(riotClient, rateLimiter))
+	http.HandleFunc("/search/player", internal.SearchPlayerHandler(riotClient, rateLimiter))
+	http.HandleFunc("/league/challenger", internal.ChallengerHandler(riotClient, rateLimiter))
+	http.HandleFunc("/league/grandmaster", internal.GrandmasterHandler(riotClient, rateLimiter))
+	http.HandleFunc("/league/master", internal.MasterHandler(riotClient, rateLimiter))
+	http.HandleFunc("/league/entries", internal.EntriesHandler(riotClient, rateLimiter))
+	http.HandleFunc("/league/by-puuid", internal.LeagueByPUUIDHandler(riotClient, rateLimiter))
+}
 
-	ratelimiter = internal.NewRateLimiter(cfg, 100, 10*time.Second)
-
-	cacheManager = internal.NewCacheManager(cfg)
-
-	riotClient = internal.NewRiotAPIClient(cfg, cacheManager)
-
-	var err error
-	natsClient, err = internal.NewNATSClient(cfg)
-	if err != nil {
-		log.Printf("Warning: Error connecting to NATS: %v", err)
-	} else {
-		defer natsClient.Conn.Close()
-		
-		riotClient.SetNATSClient(natsClient)
-
-		_, err = natsClient.StartSummonerFetchWorker(func(msg *nats.Msg) {
-			log.Printf("Message received in summoner worker: %s", string(msg.Data))
-		})
-		if err != nil {
-			log.Printf("Warning: Error starting summoner NATS worker: %v", err)
-		}
-
-		_, err = natsClient.StartSummonerNameWorker(riotClient, cacheManager)
-		if err != nil {
-			log.Printf("Warning: Error starting summoner name NATS worker: %v", err)
-		}
-
-		_, err = natsClient.StartLeagueUpdateWorker(riotClient, cacheManager)
-		if err != nil {
-			log.Printf("Warning: Error starting league NATS worker: %v", err)
-		}
-
-		scheduleLeagueUpdates()
-	}
-
-	setupRoutes()
-
-	port := cfg.AppPort
+func startServer(port string) {
 	if port == "" {
 		port = "8000"
 	}
@@ -177,7 +104,7 @@ func main() {
 	go func() {
 		log.Printf("Server starting on port %s", port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Error starting server: %v", err)
+			log.Fatalf("Server failed to start: %v", err)
 		}
 	}()
 
@@ -194,92 +121,4 @@ func main() {
 	}
 
 	log.Println("Server exited")
-}
-
-func searchPlayerHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	gameName := r.URL.Query().Get("gameName")
-	tagLine := r.URL.Query().Get("tagLine")
-	
-	if gameName == "" {
-		http.Error(w, "gameName is required", http.StatusBadRequest)
-		return
-	}
-	
-	if tagLine == "" {
-		tagLine = "BR1"
-	}
-	
-	log.Printf("Search request: gameName='%s', tagLine='%s'", gameName, tagLine)
-	
-	allowed, err := ratelimiter.Allow(ctx, "search:"+gameName+":"+tagLine)
-	if err != nil {
-		log.Printf("Rate limiter error: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	if !allowed {
-		log.Printf("Rate limit exceeded for search: %s#%s", gameName, tagLine)
-		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
-		return
-	}
-	
-	accountData, err := riotClient.GetAccountByGameName(gameName, tagLine)
-	if err != nil {
-		log.Printf("Error finding account %s#%s: %v", gameName, tagLine, err)
-		
-		if strings.Contains(err.Error(), "404") {
-			http.Error(w, "Player not found", http.StatusNotFound)
-			return
-		}
-		
-		if strings.Contains(err.Error(), "403") {
-			http.Error(w, "API key invalid or expired", http.StatusServiceUnavailable)
-			return
-		}
-		
-		if strings.Contains(err.Error(), "429") {
-			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
-			return
-		}
-		
-		http.Error(w, "Failed to fetch account data", http.StatusBadGateway)
-		return
-	}
-	
-	log.Printf("Account found: %s#%s -> PUUID: %s", accountData.GameName, accountData.TagLine, accountData.PUUID)
-	
-	summonerData, err := riotClient.GetSummonerByPUUID(accountData.PUUID)
-	if err != nil {
-		log.Printf("Error fetching summoner data for PUUID %s: %v", accountData.PUUID, err)
-	}
-	
-	leagueData, err := riotClient.GetLeagueByPUUID(accountData.PUUID)
-	if err != nil {
-		log.Printf("Error fetching league data for PUUID %s: %v", accountData.PUUID, err)
-	}
-	
-	var tftLeague *internal.LeagueEntry
-	if leagueData != nil && len(leagueData) > 0 {
-		for _, entry := range leagueData {
-			if entry.QueueType == "RANKED_TFT" {
-				tftLeague = &entry
-				break
-			}
-		}
-	}
-	
-	result := map[string]interface{}{
-		"account":  accountData,
-		"summoner": summonerData,
-		"puuid":    accountData.PUUID,
-		"gameName": accountData.GameName,
-		"tagLine":  accountData.TagLine,
-		"league":   tftLeague,
-	}
-	
-	log.Printf("Search successful: %s#%s", accountData.GameName, accountData.TagLine)
-	
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
 }

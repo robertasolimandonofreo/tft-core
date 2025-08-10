@@ -35,7 +35,7 @@ func NewDatabaseManager(cfg *Config) *DatabaseManager {
 		cfg.PostgresPort,
 		cfg.PostgresUser,
 		cfg.PostgresPassword,
-		cfg.PostgresDb,
+		cfg.PostgresDB,
 		cfg.PostgresSSLMode,
 	)
 
@@ -114,24 +114,6 @@ func (dm *DatabaseManager) SetSummonerName(puuid, gameName, tagLine, summonerID,
 
 	log.Printf("Summoner cached: %s#%s (PUUID: %s)", gameName, tagLine, puuid[:20]+"...")
 	return nil
-}
-
-func (dm *DatabaseManager) GetCacheStats() (map[string]interface{}, error) {
-	if !dm.Enabled {
-		return map[string]interface{}{
-			"enabled": false,
-		}, nil
-	}
-
-	var total, recent int
-	dm.DB.QueryRow("SELECT COUNT(*) FROM summoner_cache").Scan(&total)
-	dm.DB.QueryRow("SELECT COUNT(*) FROM summoner_cache WHERE last_updated > NOW() - INTERVAL '24 hours'").Scan(&recent)
-
-	return map[string]interface{}{
-		"enabled":       true,
-		"total_cached":  total,
-		"recent_cached": recent,
-	}, nil
 }
 
 func (dm *DatabaseManager) Close() {

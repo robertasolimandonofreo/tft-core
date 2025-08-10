@@ -12,7 +12,7 @@ type Config struct {
 	PostgresPort     string
 	PostgresUser     string
 	PostgresPassword string
-	PostgresDatabase string
+	PostgresDb       string
 	PostgresSSLMode  string
 	RedisHost     string
 	RedisPort     string
@@ -27,11 +27,15 @@ type Config struct {
 	AppEnv   string
 	LogLevel string
 	CacheEnabled bool
+	DatabaseEnabled bool
 }
 
 func LoadConfig() *Config {
 	cacheEnabled := os.Getenv("CACHE_ENABLED")
 	enabled := cacheEnabled == "true" || cacheEnabled == ""
+	
+	dbEnabled := os.Getenv("DATABASE_ENABLED")
+	dbEnabledBool := dbEnabled == "true" || dbEnabled == ""
 	
 	return &Config{
 		RiotAPIKey:    os.Getenv("RIOT_API_KEY"),
@@ -42,7 +46,7 @@ func LoadConfig() *Config {
 		PostgresPort:     os.Getenv("POSTGRES_PORT"),
 		PostgresUser:     os.Getenv("POSTGRES_USER"),
 		PostgresPassword: os.Getenv("POSTGRES_PASSWORD"),
-		PostgresDatabase: os.Getenv("POSTGRES_DB"),
+		PostgresDb: 	  os.Getenv("POSTGRES_DB"),
 		PostgresSSLMode:  os.Getenv("POSTGRES_SSL_MODE"),
 
 		RedisHost:     os.Getenv("REDIS_HOST"),
@@ -61,5 +65,6 @@ func LoadConfig() *Config {
 		AppEnv:   os.Getenv("APP_ENV"),
 		LogLevel: os.Getenv("LOG_LEVEL"),
 		CacheEnabled: enabled,
+		DatabaseEnabled: dbEnabledBool,
 	}
 }

@@ -3,6 +3,7 @@ module github.com/robertasolimandonofreo/tft-core
 go 1.24.0
 
 require (
+	github.com/lib/pq v1.10.9
 	github.com/nats-io/nats.go v1.44.0
 	github.com/redis/go-redis/v9 v9.12.0
 )

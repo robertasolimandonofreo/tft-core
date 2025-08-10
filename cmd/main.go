@@ -39,8 +39,8 @@ func main() {
 	}
 
 	cacheManager := internal.NewCacheManager(cfg, dbManager)
-	rateLimiter := internal.NewRateLimiter(cfg)
-	riotClient := internal.NewRiotAPIClient(cfg, cacheManager)
+	rateLimiter := internal.NewRateLimiter(cfg, logger)
+	riotClient := internal.NewRiotAPIClient(cfg, cacheManager, logger, metrics)
 
 	var natsClient *internal.NATSClient
 	if cfg.NATSUrl != "" {
@@ -130,14 +130,14 @@ func scheduleLeagueUpdates(natsClient *internal.NATSClient, region string, logge
 }
 
 func setupRoutes(riotClient *internal.RiotAPIClient, rateLimiter *internal.RateLimiter, middleware *internal.LoggingMiddleware, logger *internal.Logger) {
-	http.HandleFunc("/healthz", middleware.Handler(internal.HealthHandler()))
-	http.HandleFunc("/summoner", middleware.Handler(internal.SummonerHandler(riotClient, rateLimiter)))
-	http.HandleFunc("/search/player", middleware.Handler(internal.SearchPlayerHandler(riotClient, rateLimiter)))
-	http.HandleFunc("/league/challenger", middleware.Handler(internal.ChallengerHandler(riotClient, rateLimiter)))
-	http.HandleFunc("/league/grandmaster", middleware.Handler(internal.GrandmasterHandler(riotClient, rateLimiter)))
-	http.HandleFunc("/league/master", middleware.Handler(internal.MasterHandler(riotClient, rateLimiter)))
-	http.HandleFunc("/league/entries", middleware.Handler(internal.EntriesHandler(riotClient, rateLimiter)))
-	http.HandleFunc("/league/by-puuid", middleware.Handler(internal.LeagueByPUUIDHandler(riotClient, rateLimiter)))
+	http.HandleFunc("/healthz", middleware.Handler(internal.HealthHandler(logger)))
+	http.HandleFunc("/summoner", middleware.Handler(internal.SummonerHandler(riotClient, rateLimiter, logger)))
+	http.HandleFunc("/search/player", middleware.Handler(internal.SearchPlayerHandler(riotClient, rateLimiter, logger)))
+	http.HandleFunc("/league/challenger", middleware.Handler(internal.ChallengerHandler(riotClient, rateLimiter, logger)))
+	http.HandleFunc("/league/grandmaster", middleware.Handler(internal.GrandmasterHandler(riotClient, rateLimiter, logger)))
+	http.HandleFunc("/league/master", middleware.Handler(internal.MasterHandler(riotClient, rateLimiter, logger)))
+	http.HandleFunc("/league/entries", middleware.Handler(internal.EntriesHandler(riotClient, rateLimiter, logger)))
+	http.HandleFunc("/league/by-puuid", middleware.Handler(internal.LeagueByPUUIDHandler(riotClient, rateLimiter, logger)))
 	http.HandleFunc("/metrics", middleware.Handler(internal.MetricsHandler(logger)))
 	
 	logger.Info("routes_configured").Component("http").Log()

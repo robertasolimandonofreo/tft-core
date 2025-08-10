@@ -29,12 +29,12 @@ func (m *mockRedisClient) Set(ctx context.Context, key string, value interface{}
 	return cmd
 }
 
-type mockDatabaseManager struct {
+type mockDatabase struct {
 	enabled bool
 	names   map[string]string
 }
 
-func (m *mockDatabaseManager) GetSummonerName(puuid string) (string, error) {
+func (m *mockDatabase) GetSummonerName(puuid string) (string, error) {
 	if !m.enabled {
 		return "", redis.Nil
 	}
@@ -44,12 +44,16 @@ func (m *mockDatabaseManager) GetSummonerName(puuid string) (string, error) {
 	return "", redis.Nil
 }
 
-func (m *mockDatabaseManager) SetSummonerName(puuid, gameName, tagLine, summonerID, region string) error {
+func (m *mockDatabase) SetSummonerName(puuid, gameName, tagLine, summonerID, region string) error {
 	if !m.enabled {
 		return nil
 	}
 	m.names[puuid] = gameName + "#" + tagLine
 	return nil
+}
+
+func (m *mockDatabase) Close() {
+	return
 }
 
 func TestCacheManager_Key(t *testing.T) {
@@ -101,7 +105,7 @@ func TestCacheManager_GetSummonerName_Redis(t *testing.T) {
 }
 
 func TestCacheManager_GetSummonerName_Database_Fallback(t *testing.T) {
-	mockDB := &mockDatabaseManager{
+	mockDB := &mockDatabase{
 		enabled: true,
 		names:   map[string]string{"test123": "DBPlayer#BR1"},
 	}
@@ -123,7 +127,7 @@ func TestCacheManager_GetSummonerName_Database_Fallback(t *testing.T) {
 }
 
 func TestCacheManager_SetSummonerName(t *testing.T) {
-	mockDB := &mockDatabaseManager{
+	mockDB := &mockDatabase{
 		enabled: true,
 		names:   make(map[string]string),
 	}

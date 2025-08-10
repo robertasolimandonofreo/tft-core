@@ -107,7 +107,7 @@ func (nc *NATSClient) StartSummonerNameWorker(riotClient *RiotAPIClient, cacheMa
 		ctx := context.Background()
 		
 		if cachedName, err := cacheManager.GetSummonerName(ctx, task.PUUID); err == nil && cachedName != "" {
-			log.Printf("Nome já existe no cache para PUUID %s: %s", task.PUUID[:30]+"...", cachedName)
+			log.Printf("Name already exists in cache for PUUID %s: %s", task.PUUID[:30]+"...", cachedName)
 			return
 		}
 		
@@ -126,10 +126,10 @@ func (nc *NATSClient) StartSummonerNameWorker(riotClient *RiotAPIClient, cacheMa
 			if err := cacheManager.SetSummonerName(ctx, task.PUUID, fullName); err != nil {
 				log.Printf("Error caching summoner name: %v", err)
 			} else {
-				log.Printf("Nome cacheado com sucesso: PUUID=%s, Nome=%s", task.PUUID[:30]+"...", fullName)
+				log.Printf("Name cached successfully: PUUID=%s, Name=%s", task.PUUID[:30]+"...", fullName)
 			}
 		} else {
-			log.Printf("GameName não encontrado nos dados da account: %+v", accountData)
+			log.Printf("GameName not found in account data: %+v", accountData)
 		}
 	}
 	

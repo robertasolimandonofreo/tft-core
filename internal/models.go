@@ -2,8 +2,8 @@ package internal
 
 type LeagueEntry struct {
 	LeagueID     string      `json:"leagueId"`
-	PUUID        string      `json:"puuid"`          // ✅ Campo correto da TFT API
-	SummonerID   string      `json:"summonerId"`     // Fallback para outras APIs
+	PUUID        string      `json:"puuid"`
+	SummonerID   string      `json:"summonerId"`
 	SummonerName string      `json:"summonerName"`
 	QueueType    string      `json:"queueType"`
 	Tier         string      `json:"tier"`
@@ -19,11 +19,9 @@ type LeagueEntry struct {
 }
 
 func (le *LeagueEntry) GetUniqueID() string {
-	// TFT API usa PUUID diretamente
 	if le.PUUID != "" {
 		return le.PUUID
 	}
-	// Fallback para outras APIs
 	if le.SummonerID != "" {
 		return le.SummonerID
 	}

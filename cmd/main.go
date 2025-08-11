@@ -60,7 +60,7 @@ func main() {
 	}
 
 	middleware := internal.NewLoggingMiddleware(logger, metrics)
-	setupRoutes(riotClient, rateLimiter, middleware, logger)
+	setupRoutes(riotClient, rateLimiter, middleware, logger, metrics)
 	startServer(cfg.AppPort, logger)
 }
 
@@ -129,7 +129,7 @@ func scheduleLeagueUpdates(natsClient *internal.NATSClient, region string, logge
 		Log()
 }
 
-func setupRoutes(riotClient *internal.RiotAPIClient, rateLimiter *internal.RateLimiter, middleware *internal.LoggingMiddleware, logger *internal.Logger) {
+func setupRoutes(riotClient *internal.RiotAPIClient, rateLimiter *internal.RateLimiter, middleware *internal.LoggingMiddleware, logger *internal.Logger, metrics *internal.MetricsCollector) {
 	http.HandleFunc("/healthz", middleware.Handler(internal.HealthHandler(logger)))
 	http.HandleFunc("/summoner", middleware.Handler(internal.SummonerHandler(riotClient, rateLimiter, logger)))
 	http.HandleFunc("/search/player", middleware.Handler(internal.SearchPlayerHandler(riotClient, rateLimiter, logger)))
@@ -138,7 +138,7 @@ func setupRoutes(riotClient *internal.RiotAPIClient, rateLimiter *internal.RateL
 	http.HandleFunc("/league/master", middleware.Handler(internal.MasterHandler(riotClient, rateLimiter, logger)))
 	http.HandleFunc("/league/entries", middleware.Handler(internal.EntriesHandler(riotClient, rateLimiter, logger)))
 	http.HandleFunc("/league/by-puuid", middleware.Handler(internal.LeagueByPUUIDHandler(riotClient, rateLimiter, logger)))
-	http.HandleFunc("/metrics", middleware.Handler(internal.MetricsHandler(logger)))
+	http.HandleFunc("/metrics", middleware.Handler(internal.MetricsHandler(logger, metrics)))
 	
 	logger.Info("routes_configured").Component("http").Log()
 }

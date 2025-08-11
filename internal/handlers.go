@@ -492,7 +492,7 @@ func LeagueByPUUIDHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, l
 	}))
 }
 
-func MetricsHandler(logger *Logger) http.HandlerFunc {
+func MetricsHandler(logger *Logger, metrics *MetricsCollector) http.HandlerFunc {
 	return withCORS(func(w http.ResponseWriter, r *http.Request) {
 		requestID := GetRequestID(r.Context())
 		
@@ -502,9 +502,7 @@ func MetricsHandler(logger *Logger) http.HandlerFunc {
 			Request("", "", requestID).
 			Log()
 
-		writeJSON(w, map[string]interface{}{
-			"status": "metrics endpoint available",
-			"note":   "metrics are logged to stdout",
-		}, logger, r)
+		metricsData := metrics.GetMetrics()
+		writeJSON(w, metricsData, logger, r)
 	})
 }

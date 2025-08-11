@@ -19,7 +19,7 @@ func main() {
 
 	logger := internal.NewLogger(cfg)
 	metrics := internal.NewMetricsCollector(logger)
-	
+
 	logger.Info("service_starting").
 		Component("main").
 		Operation("startup").
@@ -121,7 +121,7 @@ func scheduleLeagueUpdates(natsClient *internal.NATSClient, region string, logge
 			}
 		}
 	}()
-	
+
 	logger.Info("league_update_scheduler_started").
 		Component("scheduler").
 		Operation("start").
@@ -139,7 +139,7 @@ func setupRoutes(riotClient *internal.RiotAPIClient, rateLimiter *internal.RateL
 	http.HandleFunc("/league/entries", middleware.Handler(internal.EntriesHandler(riotClient, rateLimiter, logger)))
 	http.HandleFunc("/league/by-puuid", middleware.Handler(internal.LeagueByPUUIDHandler(riotClient, rateLimiter, logger)))
 	http.HandleFunc("/metrics", middleware.Handler(internal.MetricsHandler(logger, metrics)))
-	
+
 	logger.Info("routes_configured").Component("http").Log()
 }
 
@@ -161,7 +161,7 @@ func startServer(port string, logger *internal.Logger) {
 			Operation("listen").
 			Meta("port", port).
 			Log()
-			
+
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("server_start_failed").
 				Component("http").

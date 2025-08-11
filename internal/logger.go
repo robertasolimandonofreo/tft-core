@@ -17,30 +17,30 @@ const (
 )
 
 type LogEntry struct {
-	Timestamp   time.Time              `json:"timestamp"`
-	Level       LogLevel               `json:"level"`
-	Message     string                 `json:"message"`
-	Service     string                 `json:"service"`
-	Component   string                 `json:"component"`
-	Operation   string                 `json:"operation,omitempty"`
-	Duration    int64                  `json:"duration_ms,omitempty"`
-	StatusCode  int                    `json:"status_code,omitempty"`
-	Method      string                 `json:"method,omitempty"`
-	Path        string                 `json:"path,omitempty"`
-	UserAgent   string                 `json:"user_agent,omitempty"`
-	RemoteAddr  string                 `json:"remote_addr,omitempty"`
-	RequestID   string                 `json:"request_id,omitempty"`
-	CacheHit    *bool                  `json:"cache_hit,omitempty"`
-	CacheKey    string                 `json:"cache_key,omitempty"`
-	QueueDepth  int                    `json:"queue_depth,omitempty"`
-	WorkerID    string                 `json:"worker_id,omitempty"`
-	TaskType    string                 `json:"task_type,omitempty"`
-	PUUID       string                 `json:"puuid,omitempty"`
-	Region      string                 `json:"region,omitempty"`
-	Tier        string                 `json:"tier,omitempty"`
-	Error       string                 `json:"error,omitempty"`
-	ErrorCode   string                 `json:"error_code,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Timestamp  time.Time              `json:"timestamp"`
+	Level      LogLevel               `json:"level"`
+	Message    string                 `json:"message"`
+	Service    string                 `json:"service"`
+	Component  string                 `json:"component"`
+	Operation  string                 `json:"operation,omitempty"`
+	Duration   int64                  `json:"duration_ms,omitempty"`
+	StatusCode int                    `json:"status_code,omitempty"`
+	Method     string                 `json:"method,omitempty"`
+	Path       string                 `json:"path,omitempty"`
+	UserAgent  string                 `json:"user_agent,omitempty"`
+	RemoteAddr string                 `json:"remote_addr,omitempty"`
+	RequestID  string                 `json:"request_id,omitempty"`
+	CacheHit   *bool                  `json:"cache_hit,omitempty"`
+	CacheKey   string                 `json:"cache_key,omitempty"`
+	QueueDepth int                    `json:"queue_depth,omitempty"`
+	WorkerID   string                 `json:"worker_id,omitempty"`
+	TaskType   string                 `json:"task_type,omitempty"`
+	PUUID      string                 `json:"puuid,omitempty"`
+	Region     string                 `json:"region,omitempty"`
+	Tier       string                 `json:"tier,omitempty"`
+	Error      string                 `json:"error,omitempty"`
+	ErrorCode  string                 `json:"error_code,omitempty"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type Logger struct {

@@ -66,7 +66,7 @@ func (rl *RateLimiter) Allow(ctx context.Context, key string) (bool, error) {
 
 func (rl *RateLimiter) checkLimit(ctx context.Context, key string, limit RateLimit) (bool, error) {
 	redisKey := fmt.Sprintf("%s:%s:%d", rl.prefix, key, int(limit.window.Seconds()))
-	
+
 	count, err := rl.client.Incr(ctx, redisKey).Result()
 	if err != nil {
 		return false, err

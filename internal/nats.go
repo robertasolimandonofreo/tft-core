@@ -135,9 +135,9 @@ func processLeagueUpdateTask(msg *nats.Msg, riotClient *RiotAPIClient, cacheMana
 	log.Printf("Processing league update task: %+v", task)
 
 	updateFuncs := map[string]func() error{
-		"challenger":   func() error { return nc.updateChallengerLeague(riotClient, cacheManager, task.Region) },
-		"grandmaster":  func() error { return nc.updateGrandmasterLeague(riotClient, cacheManager, task.Region) },
-		"master":       func() error { return nc.updateMasterLeague(riotClient, cacheManager, task.Region) },
+		"challenger":  func() error { return nc.updateChallengerLeague(riotClient, cacheManager, task.Region) },
+		"grandmaster": func() error { return nc.updateGrandmasterLeague(riotClient, cacheManager, task.Region) },
+		"master":      func() error { return nc.updateMasterLeague(riotClient, cacheManager, task.Region) },
 	}
 
 	if updateFunc, exists := updateFuncs[task.Type]; exists {

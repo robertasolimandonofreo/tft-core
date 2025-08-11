@@ -20,15 +20,15 @@ const (
 )
 
 type RiotAPIClient struct {
-	apiKey       string
-	baseURL      string
-	accountURL   string
-	client       *http.Client
-	cache        *CacheManager
-	region       string
-	natsClient   *NATSClient
-	logger       *Logger
-	metrics      *MetricsCollector
+	apiKey     string
+	baseURL    string
+	accountURL string
+	client     *http.Client
+	cache      *CacheManager
+	region     string
+	natsClient *NATSClient
+	logger     *Logger
+	metrics    *MetricsCollector
 }
 
 func NewRiotAPIClient(cfg *Config, cache *CacheManager, logger *Logger, metrics *MetricsCollector) *RiotAPIClient {
@@ -60,7 +60,7 @@ func getAccountAPIURL(region string) string {
 		"KR":   AsiaAPIURL,
 		"OC1":  SeaAPIURL,
 	}
-	
+
 	if url, exists := regionMap[region]; exists {
 		return url
 	}
@@ -73,7 +73,7 @@ func (c *RiotAPIClient) SetNATSClient(natsClient *NATSClient) {
 
 func (c *RiotAPIClient) doRequest(url string) ([]byte, error) {
 	start := time.Now()
-	
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -181,10 +181,10 @@ func (c *RiotAPIClient) GetAccountByPUUID(puuid string) (*AccountData, error) {
 
 func (c *RiotAPIClient) GetAccountByGameName(gameName, tagLine string) (*AccountData, error) {
 	ctx := context.Background()
-	
+
 	cleanGameName := strings.TrimSpace(gameName)
 	cleanTagLine := strings.TrimSpace(tagLine)
-	
+
 	if cleanGameName == "" {
 		return nil, fmt.Errorf("gameName cannot be empty")
 	}
@@ -193,7 +193,7 @@ func (c *RiotAPIClient) GetAccountByGameName(gameName, tagLine string) (*Account
 	}
 
 	cacheKey := c.cache.Key("account_name", c.region, cleanGameName, cleanTagLine)
-	
+
 	var cached AccountData
 	if err := c.cache.Get(ctx, cacheKey, &cached); err == nil {
 		if c.metrics != nil {
@@ -208,10 +208,10 @@ func (c *RiotAPIClient) GetAccountByGameName(gameName, tagLine string) (*Account
 
 	encodedGameName := strings.ReplaceAll(url.QueryEscape(cleanGameName), "+", "%20")
 	encodedTagLine := strings.ReplaceAll(url.QueryEscape(cleanTagLine), "+", "%20")
-	
-	apiURL := fmt.Sprintf("%s/riot/account/v1/accounts/by-riot-id/%s/%s", 
+
+	apiURL := fmt.Sprintf("%s/riot/account/v1/accounts/by-riot-id/%s/%s",
 		c.accountURL, encodedGameName, encodedTagLine)
-		
+
 	data, err := c.doRequest(apiURL)
 	if err != nil {
 		return nil, err
@@ -377,14 +377,13 @@ func (c *RiotAPIClient) GetLeagueByPUUID(puuid string) ([]LeagueEntry, error) {
 
 func (c *RiotAPIClient) enrichEntries(entries []LeagueEntry, tier string) {
 	ctx := context.Background()
-	
+
 	for i := range entries {
 		entries[i].Tier = tier
-		
-		if entries[i].SummonerName != "" && 
-		   entries[i].SummonerName != "Unknown" && 
-		   entries[i].SummonerName != "Loading..." &&
-		   entries[i].SummonerName != "" {
+
+		if entries[i].SummonerName != "" &&
+			entries[i].SummonerName != "Unknown" &&
+			entries[i].SummonerName != "Loading..." {
 			continue
 		}
 
@@ -398,7 +397,7 @@ func (c *RiotAPIClient) enrichEntries(entries []LeagueEntry, tier string) {
 			entries[i].SummonerName = name
 			continue
 		}
-			
+
 		if c.natsClient != nil {
 			task := SummonerNameTask{
 				PUUID:  entries[i].PUUID,

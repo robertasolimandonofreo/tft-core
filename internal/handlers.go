@@ -30,7 +30,7 @@ func writeError(w http.ResponseWriter, err error, logger *Logger, r *http.Reques
 	}
 
 	requestID := GetRequestID(r.Context())
-	
+
 	logger.Error("api_error").
 		Component("http").
 		Operation("write_error").
@@ -52,7 +52,7 @@ func writeError(w http.ResponseWriter, err error, logger *Logger, r *http.Reques
 
 func writeJSON(w http.ResponseWriter, data interface{}, logger *Logger, r *http.Request) {
 	requestID := GetRequestID(r.Context())
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		logger.Error("json_encode_failed").
@@ -99,7 +99,7 @@ func withRateLimit(rateLimiter *RateLimiter, key string, logger *Logger) func(ht
 
 func checkRateLimit(rateLimiter *RateLimiter, key string, logger *Logger, w http.ResponseWriter, r *http.Request) bool {
 	requestID := GetRequestID(r.Context())
-	
+
 	allowed, err := rateLimiter.Allow(r.Context(), key)
 	if err != nil {
 		logger.Error("rate_limiter_error").
@@ -112,7 +112,7 @@ func checkRateLimit(rateLimiter *RateLimiter, key string, logger *Logger, w http
 		writeError(w, NewAPIError("Rate limiter error", http.StatusInternalServerError), logger, r)
 		return false
 	}
-	
+
 	if !allowed {
 		logger.Warn("rate_limit_exceeded").
 			Component("rate_limiter").
@@ -123,7 +123,7 @@ func checkRateLimit(rateLimiter *RateLimiter, key string, logger *Logger, w http
 		writeError(w, NewAPIError("Rate limit exceeded", http.StatusTooManyRequests), logger, r)
 		return false
 	}
-	
+
 	return true
 }
 
@@ -133,7 +133,7 @@ func HealthHandler(logger *Logger) http.HandlerFunc {
 			Component("health").
 			Operation("check").
 			Log()
-			
+
 		writeJSON(w, map[string]interface{}{
 			"status":    "ok",
 			"timestamp": time.Now().Unix(),
@@ -149,7 +149,7 @@ func SummonerHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, logger
 	return withCORS(withRateLimit(rateLimiter, "summoner", logger)(func(w http.ResponseWriter, r *http.Request) {
 		puuid := r.URL.Query().Get("puuid")
 		requestID := GetRequestID(r.Context())
-		
+
 		if !validatePUUID(puuid, requestID, logger, w, r) {
 			return
 		}
@@ -201,7 +201,7 @@ func handleSummonerError(err error, puuid, requestID string, logger *Logger, w h
 		writeError(w, NewAPIError("Summoner not found", http.StatusNotFound), logger, r)
 		return
 	}
-	
+
 	logger.Error("summoner_fetch_failed").
 		Component("summoner").
 		Operation("get_summoner").
@@ -339,7 +339,7 @@ func logSearchSuccess(puuid, gameName, tagLine, requestID string, logger *Logger
 func ChallengerHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, logger *Logger) http.HandlerFunc {
 	return withCORS(withRateLimit(rateLimiter, "challenger", logger)(func(w http.ResponseWriter, r *http.Request) {
 		requestID := GetRequestID(r.Context())
-		
+
 		logger.Info("challenger_request").
 			Component("league").
 			Operation("get_challenger").
@@ -357,14 +357,14 @@ func ChallengerHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, logg
 			writeError(w, NewAPIError("Failed to fetch challenger league", http.StatusBadGateway), logger, r)
 			return
 		}
-		
+
 		logger.Info("challenger_success").
 			Component("league").
 			Operation("get_challenger").
 			Request("", "", requestID).
 			Meta("entries_count", len(result.Entries)).
 			Log()
-			
+
 		writeJSON(w, result, logger, r)
 	}))
 }
@@ -372,7 +372,7 @@ func ChallengerHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, logg
 func GrandmasterHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, logger *Logger) http.HandlerFunc {
 	return withCORS(withRateLimit(rateLimiter, "grandmaster", logger)(func(w http.ResponseWriter, r *http.Request) {
 		requestID := GetRequestID(r.Context())
-		
+
 		logger.Info("grandmaster_request").
 			Component("league").
 			Operation("get_grandmaster").
@@ -390,14 +390,14 @@ func GrandmasterHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, log
 			writeError(w, NewAPIError("Failed to fetch grandmaster league", http.StatusBadGateway), logger, r)
 			return
 		}
-		
+
 		logger.Info("grandmaster_success").
 			Component("league").
 			Operation("get_grandmaster").
 			Request("", "", requestID).
 			Meta("entries_count", len(result.Entries)).
 			Log()
-			
+
 		writeJSON(w, result, logger, r)
 	}))
 }
@@ -405,7 +405,7 @@ func GrandmasterHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, log
 func MasterHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, logger *Logger) http.HandlerFunc {
 	return withCORS(withRateLimit(rateLimiter, "master", logger)(func(w http.ResponseWriter, r *http.Request) {
 		requestID := GetRequestID(r.Context())
-		
+
 		logger.Info("master_request").
 			Component("league").
 			Operation("get_master").
@@ -423,14 +423,14 @@ func MasterHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, logger *
 			writeError(w, NewAPIError("Failed to fetch master league", http.StatusBadGateway), logger, r)
 			return
 		}
-		
+
 		logger.Info("master_success").
 			Component("league").
 			Operation("get_master").
 			Request("", "", requestID).
 			Meta("entries_count", len(result.Entries)).
 			Log()
-			
+
 		writeJSON(w, result, logger, r)
 	}))
 }
@@ -521,7 +521,7 @@ func LeagueByPUUIDHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, l
 	return withCORS(withRateLimit(rateLimiter, "league-by-puuid", logger)(func(w http.ResponseWriter, r *http.Request) {
 		puuid := r.URL.Query().Get("puuid")
 		requestID := GetRequestID(r.Context())
-		
+
 		if !validatePUUID(puuid, requestID, logger, w, r) {
 			return
 		}
@@ -561,7 +561,7 @@ func LeagueByPUUIDHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, l
 func MetricsHandler(logger *Logger, metrics *MetricsCollector) http.HandlerFunc {
 	return withCORS(func(w http.ResponseWriter, r *http.Request) {
 		requestID := GetRequestID(r.Context())
-		
+
 		logger.Debug("metrics_request").
 			Component("metrics").
 			Operation("get_metrics").

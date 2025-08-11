@@ -89,35 +89,42 @@ func withCORS(next http.HandlerFunc) http.HandlerFunc {
 func withRateLimit(rateLimiter *RateLimiter, key string, logger *Logger) func(http.HandlerFunc) http.HandlerFunc {
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			requestID := GetRequestID(r.Context())
-			
-			allowed, err := rateLimiter.Allow(r.Context(), key)
-			if err != nil {
-				logger.Error("rate_limiter_error").
-					Component("rate_limiter").
-					Operation("check_limit").
-					Request("", "", requestID).
-					Err(err).
-					Meta("key", key).
-					Log()
-				writeError(w, NewAPIError("Rate limiter error", http.StatusInternalServerError), logger, r)
+			if !checkRateLimit(rateLimiter, key, logger, w, r) {
 				return
 			}
-			
-			if !allowed {
-				logger.Warn("rate_limit_exceeded").
-					Component("rate_limiter").
-					Operation("check_limit").
-					Request("", "", requestID).
-					Meta("key", key).
-					Log()
-				writeError(w, NewAPIError("Rate limit exceeded", http.StatusTooManyRequests), logger, r)
-				return
-			}
-			
 			next(w, r)
 		}
 	}
+}
+
+func checkRateLimit(rateLimiter *RateLimiter, key string, logger *Logger, w http.ResponseWriter, r *http.Request) bool {
+	requestID := GetRequestID(r.Context())
+	
+	allowed, err := rateLimiter.Allow(r.Context(), key)
+	if err != nil {
+		logger.Error("rate_limiter_error").
+			Component("rate_limiter").
+			Operation("check_limit").
+			Request("", "", requestID).
+			Err(err).
+			Meta("key", key).
+			Log()
+		writeError(w, NewAPIError("Rate limiter error", http.StatusInternalServerError), logger, r)
+		return false
+	}
+	
+	if !allowed {
+		logger.Warn("rate_limit_exceeded").
+			Component("rate_limiter").
+			Operation("check_limit").
+			Request("", "", requestID).
+			Meta("key", key).
+			Log()
+		writeError(w, NewAPIError("Rate limit exceeded", http.StatusTooManyRequests), logger, r)
+		return false
+	}
+	
+	return true
 }
 
 func HealthHandler(logger *Logger) http.HandlerFunc {
@@ -143,56 +150,75 @@ func SummonerHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, logger
 		puuid := r.URL.Query().Get("puuid")
 		requestID := GetRequestID(r.Context())
 		
-		if puuid == "" {
-			logger.Warn("missing_puuid_parameter").
-				Component("summoner").
-				Operation("get_summoner").
-				Request("", "", requestID).
-				Log()
-			writeError(w, NewAPIError("puuid is required", http.StatusBadRequest), logger, r)
+		if !validatePUUID(puuid, requestID, logger, w, r) {
 			return
 		}
 
-		logger.Info("summoner_request").
-			Component("summoner").
-			Operation("get_summoner").
-			Request("", "", requestID).
-			Game(puuid, "", "").
-			Log()
+		logSummonerRequest(puuid, requestID, logger)
 
 		result, err := riotClient.GetSummonerByPUUID(puuid)
 		if err != nil {
-			if strings.Contains(err.Error(), "404") {
-				logger.Warn("summoner_not_found").
-					Component("summoner").
-					Operation("get_summoner").
-					Request("", "", requestID).
-					Game(puuid, "", "").
-					Err(err).
-					Log()
-				writeError(w, NewAPIError("Summoner not found", http.StatusNotFound), logger, r)
-				return
-			}
-			logger.Error("summoner_fetch_failed").
-				Component("summoner").
-				Operation("get_summoner").
-				Request("", "", requestID).
-				Game(puuid, "", "").
-				Err(err).
-				Log()
-			writeError(w, NewAPIError("Failed to fetch summoner data", http.StatusBadGateway), logger, r)
+			handleSummonerError(err, puuid, requestID, logger, w, r)
 			return
 		}
 
-		logger.Info("summoner_success").
+		logSummonerSuccess(puuid, requestID, logger)
+		writeJSON(w, result, logger, r)
+	}))
+}
+
+func validatePUUID(puuid, requestID string, logger *Logger, w http.ResponseWriter, r *http.Request) bool {
+	if puuid == "" {
+		logger.Warn("missing_puuid_parameter").
+			Component("summoner").
+			Operation("get_summoner").
+			Request("", "", requestID).
+			Log()
+		writeError(w, NewAPIError("puuid is required", http.StatusBadRequest), logger, r)
+		return false
+	}
+	return true
+}
+
+func logSummonerRequest(puuid, requestID string, logger *Logger) {
+	logger.Info("summoner_request").
+		Component("summoner").
+		Operation("get_summoner").
+		Request("", "", requestID).
+		Game(puuid, "", "").
+		Log()
+}
+
+func handleSummonerError(err error, puuid, requestID string, logger *Logger, w http.ResponseWriter, r *http.Request) {
+	if strings.Contains(err.Error(), "404") {
+		logger.Warn("summoner_not_found").
 			Component("summoner").
 			Operation("get_summoner").
 			Request("", "", requestID).
 			Game(puuid, "", "").
+			Err(err).
 			Log()
+		writeError(w, NewAPIError("Summoner not found", http.StatusNotFound), logger, r)
+		return
+	}
+	
+	logger.Error("summoner_fetch_failed").
+		Component("summoner").
+		Operation("get_summoner").
+		Request("", "", requestID).
+		Game(puuid, "", "").
+		Err(err).
+		Log()
+	writeError(w, NewAPIError("Failed to fetch summoner data", http.StatusBadGateway), logger, r)
+}
 
-		writeJSON(w, result, logger, r)
-	}))
+func logSummonerSuccess(puuid, requestID string, logger *Logger) {
+	logger.Info("summoner_success").
+		Component("summoner").
+		Operation("get_summoner").
+		Request("", "", requestID).
+		Game(puuid, "", "").
+		Log()
 }
 
 func SearchPlayerHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, logger *Logger) http.HandlerFunc {
@@ -201,87 +227,113 @@ func SearchPlayerHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, lo
 		tagLine := r.URL.Query().Get("tagLine")
 		requestID := GetRequestID(r.Context())
 
-		if gameName == "" {
-			logger.Warn("missing_gamename_parameter").
-				Component("search").
-				Operation("search_player").
-				Request("", "", requestID).
-				Log()
-			writeError(w, NewAPIError("gameName is required", http.StatusBadRequest), logger, r)
+		if err := validateSearchParams(gameName, &tagLine, requestID, logger); err.Message != "" {
+			writeError(w, err, logger, r)
 			return
 		}
 
-		if tagLine == "" {
-			tagLine = "BR1"
-		}
-
-		logger.Info("player_search_request").
-			Component("search").
-			Operation("search_player").
-			Request("", "", requestID).
-			Meta("game_name", gameName).
-			Meta("tag_line", tagLine).
-			Log()
+		logSearchRequest(gameName, tagLine, requestID, logger)
 
 		accountData, err := riotClient.GetAccountByGameName(gameName, tagLine)
 		if err != nil {
-			if strings.Contains(err.Error(), "404") {
-				logger.Warn("player_not_found").
-					Component("search").
-					Operation("search_player").
-					Request("", "", requestID).
-					Meta("game_name", gameName).
-					Meta("tag_line", tagLine).
-					Err(err).
-					Log()
-				writeError(w, NewAPIError("Player not found", http.StatusNotFound), logger, r)
-				return
-			}
-			logger.Error("account_fetch_failed").
-				Component("search").
-				Operation("search_player").
-				Request("", "", requestID).
-				Meta("game_name", gameName).
-				Meta("tag_line", tagLine).
-				Err(err).
-				Log()
-			writeError(w, NewAPIError("Failed to fetch account data", http.StatusBadGateway), logger, r)
+			handleAccountError(err, gameName, tagLine, requestID, logger, w, r)
 			return
 		}
 
-		summonerData, _ := riotClient.GetSummonerByPUUID(accountData.PUUID)
-		leagueData, _ := riotClient.GetLeagueByPUUID(accountData.PUUID)
+		result := buildSearchResult(accountData, riotClient)
+		logSearchSuccess(accountData.PUUID, gameName, tagLine, requestID, logger)
+		writeJSON(w, result, logger, r)
+	}))
+}
 
-		var tftLeague *LeagueEntry
-		if leagueData != nil && len(leagueData) > 0 {
-			for _, entry := range leagueData {
-				if entry.QueueType == "RANKED_TFT" {
-					tftLeague = &entry
-					break
-				}
-			}
-		}
-
-		result := map[string]interface{}{
-			"account":  accountData,
-			"summoner": summonerData,
-			"puuid":    accountData.PUUID,
-			"gameName": accountData.GameName,
-			"tagLine":  accountData.TagLine,
-			"league":   tftLeague,
-		}
-
-		logger.Info("player_search_success").
+func validateSearchParams(gameName string, tagLine *string, requestID string, logger *Logger) APIError {
+	if gameName == "" {
+		logger.Warn("missing_gamename_parameter").
 			Component("search").
 			Operation("search_player").
 			Request("", "", requestID).
-			Game(accountData.PUUID, "", "").
+			Log()
+		return NewAPIError("gameName is required", http.StatusBadRequest)
+	}
+
+	if *tagLine == "" {
+		*tagLine = "BR1"
+	}
+
+	return APIError{}
+}
+
+func logSearchRequest(gameName, tagLine, requestID string, logger *Logger) {
+	logger.Info("player_search_request").
+		Component("search").
+		Operation("search_player").
+		Request("", "", requestID).
+		Meta("game_name", gameName).
+		Meta("tag_line", tagLine).
+		Log()
+}
+
+func handleAccountError(err error, gameName, tagLine, requestID string, logger *Logger, w http.ResponseWriter, r *http.Request) {
+	if strings.Contains(err.Error(), "404") {
+		logger.Warn("player_not_found").
+			Component("search").
+			Operation("search_player").
+			Request("", "", requestID).
 			Meta("game_name", gameName).
 			Meta("tag_line", tagLine).
+			Err(err).
 			Log()
+		writeError(w, NewAPIError("Player not found", http.StatusNotFound), logger, r)
+		return
+	}
 
-		writeJSON(w, result, logger, r)
-	}))
+	logger.Error("account_fetch_failed").
+		Component("search").
+		Operation("search_player").
+		Request("", "", requestID).
+		Meta("game_name", gameName).
+		Meta("tag_line", tagLine).
+		Err(err).
+		Log()
+	writeError(w, NewAPIError("Failed to fetch account data", http.StatusBadGateway), logger, r)
+}
+
+func buildSearchResult(accountData *AccountData, riotClient *RiotAPIClient) map[string]interface{} {
+	summonerData, _ := riotClient.GetSummonerByPUUID(accountData.PUUID)
+	leagueData, _ := riotClient.GetLeagueByPUUID(accountData.PUUID)
+
+	return map[string]interface{}{
+		"account":  accountData,
+		"summoner": summonerData,
+		"puuid":    accountData.PUUID,
+		"gameName": accountData.GameName,
+		"tagLine":  accountData.TagLine,
+		"league":   findTFTLeague(leagueData),
+	}
+}
+
+func findTFTLeague(leagueData []LeagueEntry) *LeagueEntry {
+	if leagueData == nil || len(leagueData) == 0 {
+		return nil
+	}
+
+	for _, entry := range leagueData {
+		if entry.QueueType == "RANKED_TFT" {
+			return &entry
+		}
+	}
+	return nil
+}
+
+func logSearchSuccess(puuid, gameName, tagLine, requestID string, logger *Logger) {
+	logger.Info("player_search_success").
+		Component("search").
+		Operation("search_player").
+		Request("", "", requestID).
+		Game(puuid, "", "").
+		Meta("game_name", gameName).
+		Meta("tag_line", tagLine).
+		Log()
 }
 
 func ChallengerHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, logger *Logger) http.HandlerFunc {
@@ -390,59 +442,79 @@ func EntriesHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, logger 
 		pageStr := r.URL.Query().Get("page")
 		requestID := GetRequestID(r.Context())
 
-		if tier == "" || division == "" {
-			logger.Warn("missing_tier_division_parameters").
-				Component("entries").
-				Operation("get_entries").
-				Request("", "", requestID).
-				Log()
-			writeError(w, NewAPIError("tier and division are required", http.StatusBadRequest), logger, r)
+		page, err := validateEntriesParams(tier, division, pageStr, requestID, logger, w, r)
+		if err != nil {
 			return
 		}
 
-		page := 1
-		if pageStr != "" {
-			if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
-				page = p
-			}
-		}
-
-		logger.Info("entries_request").
-			Component("entries").
-			Operation("get_entries").
-			Request("", "", requestID).
-			Game("", "", tier).
-			Meta("division", division).
-			Meta("page", page).
-			Log()
+		logEntriesRequest(tier, division, page, requestID, logger)
 
 		result, err := riotClient.GetLeagueEntries(tier, division, page)
 		if err != nil {
-			logger.Error("entries_fetch_failed").
-				Component("entries").
-				Operation("get_entries").
-				Request("", "", requestID).
-				Game("", "", tier).
-				Meta("division", division).
-				Meta("page", page).
-				Err(err).
-				Log()
-			writeError(w, NewAPIError("Failed to fetch league entries", http.StatusBadGateway), logger, r)
+			handleEntriesError(err, tier, division, page, requestID, logger, w, r)
 			return
 		}
 
-		logger.Info("entries_success").
+		logEntriesSuccess(tier, division, page, len(result.Entries), requestID, logger)
+		writeJSON(w, result, logger, r)
+	}))
+}
+
+func validateEntriesParams(tier, division, pageStr, requestID string, logger *Logger, w http.ResponseWriter, r *http.Request) (int, error) {
+	if tier == "" || division == "" {
+		logger.Warn("missing_tier_division_parameters").
 			Component("entries").
 			Operation("get_entries").
 			Request("", "", requestID).
-			Game("", "", tier).
-			Meta("division", division).
-			Meta("page", page).
-			Meta("entries_count", len(result.Entries)).
 			Log()
+		writeError(w, NewAPIError("tier and division are required", http.StatusBadRequest), logger, r)
+		return 0, NewAPIError("validation failed", http.StatusBadRequest)
+	}
 
-		writeJSON(w, result, logger, r)
-	}))
+	page := 1
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	return page, nil
+}
+
+func logEntriesRequest(tier, division string, page int, requestID string, logger *Logger) {
+	logger.Info("entries_request").
+		Component("entries").
+		Operation("get_entries").
+		Request("", "", requestID).
+		Game("", "", tier).
+		Meta("division", division).
+		Meta("page", page).
+		Log()
+}
+
+func handleEntriesError(err error, tier, division string, page int, requestID string, logger *Logger, w http.ResponseWriter, r *http.Request) {
+	logger.Error("entries_fetch_failed").
+		Component("entries").
+		Operation("get_entries").
+		Request("", "", requestID).
+		Game("", "", tier).
+		Meta("division", division).
+		Meta("page", page).
+		Err(err).
+		Log()
+	writeError(w, NewAPIError("Failed to fetch league entries", http.StatusBadGateway), logger, r)
+}
+
+func logEntriesSuccess(tier, division string, page, entriesCount int, requestID string, logger *Logger) {
+	logger.Info("entries_success").
+		Component("entries").
+		Operation("get_entries").
+		Request("", "", requestID).
+		Game("", "", tier).
+		Meta("division", division).
+		Meta("page", page).
+		Meta("entries_count", entriesCount).
+		Log()
 }
 
 func LeagueByPUUIDHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, logger *Logger) http.HandlerFunc {
@@ -450,13 +522,7 @@ func LeagueByPUUIDHandler(riotClient *RiotAPIClient, rateLimiter *RateLimiter, l
 		puuid := r.URL.Query().Get("puuid")
 		requestID := GetRequestID(r.Context())
 		
-		if puuid == "" {
-			logger.Warn("missing_puuid_parameter").
-				Component("league").
-				Operation("get_league_by_puuid").
-				Request("", "", requestID).
-				Log()
-			writeError(w, NewAPIError("puuid is required", http.StatusBadRequest), logger, r)
+		if !validatePUUID(puuid, requestID, logger, w, r) {
 			return
 		}
 

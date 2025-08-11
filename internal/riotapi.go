@@ -12,6 +12,13 @@ import (
 	"time"
 )
 
+const (
+	AmericasAPIURL = "https://americas.api.riotgames.com"
+	EuropeAPIURL   = "https://europe.api.riotgames.com"
+	AsiaAPIURL     = "https://asia.api.riotgames.com"
+	SeaAPIURL      = "https://sea.api.riotgames.com"
+)
+
 type RiotAPIClient struct {
 	apiKey       string
 	baseURL      string
@@ -40,24 +47,24 @@ func NewRiotAPIClient(cfg *Config, cache *CacheManager, logger *Logger, metrics 
 }
 
 func getAccountAPIURL(region string) string {
-	regions := map[string]string{
-		"BR1": "https://americas.api.riotgames.com",
-		"LA1": "https://americas.api.riotgames.com", 
-		"LA2": "https://americas.api.riotgames.com",
-		"NA1": "https://americas.api.riotgames.com",
-		"EUW1": "https://europe.api.riotgames.com",
-		"EUN1": "https://europe.api.riotgames.com",
-		"TR1": "https://europe.api.riotgames.com",
-		"RU": "https://europe.api.riotgames.com",
-		"JP1": "https://asia.api.riotgames.com",
-		"KR": "https://asia.api.riotgames.com",
-		"OC1": "https://sea.api.riotgames.com",
+	regionMap := map[string]string{
+		"BR1":  AmericasAPIURL,
+		"LA1":  AmericasAPIURL,
+		"LA2":  AmericasAPIURL,
+		"NA1":  AmericasAPIURL,
+		"EUW1": EuropeAPIURL,
+		"EUN1": EuropeAPIURL,
+		"TR1":  EuropeAPIURL,
+		"RU":   EuropeAPIURL,
+		"JP1":  AsiaAPIURL,
+		"KR":   AsiaAPIURL,
+		"OC1":  SeaAPIURL,
 	}
 	
-	if url, exists := regions[region]; exists {
+	if url, exists := regionMap[region]; exists {
 		return url
 	}
-	return "https://americas.api.riotgames.com"
+	return AmericasAPIURL
 }
 
 func (c *RiotAPIClient) SetNATSClient(natsClient *NATSClient) {
